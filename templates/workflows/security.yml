@@ -1,0 +1,30 @@
+# Caller template for the security scan.
+# Copy to .github/workflows/security.yml. Give every repository its own cron
+# minute and hour so the weekly runs do not all start at once.
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  security:
+    uses: IronFlock/workflows/.github/workflows/security.yml@v1
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      languages: go
+      # image: true          build and scan the Dockerfile
+      # fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error

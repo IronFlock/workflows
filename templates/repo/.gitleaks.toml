@@ -1,0 +1,8 @@
+# gitleaks: the default rules plus reviewed exceptions for this repository.
+# Add an allowlist only for a reviewed false positive, with the reason:
+#
+# [[allowlists]]
+# description = "test fixture with a fake key (reviewed 2026-10-21, M. Petzold)"
+# paths = ['''^testdata/fake-credentials\.json$''']
+[extend]
+useDefault = true

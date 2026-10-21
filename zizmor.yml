@@ -1,0 +1,9 @@
+# zizmor configuration used by workflows-lint.yml for every calling repository.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # Our own reusable workflows are called by the moving major tag (@v1),
+        # which is advanced only after the self-test is green.
+        "IronFlock/*": ref-pin
+        "*": hash-pin

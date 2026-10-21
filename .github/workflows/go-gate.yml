@@ -1,0 +1,246 @@
+# Reusable gate for Go repositories: lint, unit tests, build.
+#
+# Every logic step is a `just` recipe of the calling repository, so the gate
+# runs the same locally and in CI. `just` runs from `working-directory` and
+# finds the repository's Justfile upwards from there.
+#
+# Recipe contract (see README):
+#   lint   non-mutating static checks (gofmt -l, go mod tidy -diff, go vet,
+#          golangci-lint incl. gosec)
+#   test   hermetic unit tests: go test -race -shuffle=on -count=1 ./...
+#   build  the repository's artefact build, without publishing
+#
+# Job names stay `lint` / `unit` / `build`: required status checks and the
+# release workflows of calling repositories refer to them.
+name: go-gate
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory holding go.mod; `just` runs from here.
+        type: string
+        default: "."
+      go-version-file:
+        description: Path to go.mod (default <working-directory>/go.mod).
+        type: string
+        default: ""
+      go-version:
+        description: Go version; overrides go-version-file when set.
+        type: string
+        default: ""
+      setup-recipe:
+        description: Recipe run before the unit tests (e.g. download-frpc).
+        type: string
+        default: ""
+      build-setup-recipe:
+        description: Recipe run before each build (cross-build or build recipe).
+        type: string
+        default: ""
+      lint-recipe:
+        type: string
+        default: lint
+      test-recipe:
+        type: string
+        default: test
+      build-recipe:
+        description: Recipe for the build job when no cross-build targets are given; empty skips the build job.
+        type: string
+        default: build
+      targets:
+        description: Newline-separated GOOS/GOARCH[/GOARM] list for a cross-build matrix.
+        type: string
+        default: ""
+      targets-file:
+        description: File in the repository with one target per line (used when `targets` is empty).
+        type: string
+        default: ""
+      cross-build-command:
+        description: Command per target ($TARGET is set); default is the harness cross-build script.
+        type: string
+        default: ""
+      os:
+        description: JSON list of runners for the unit job.
+        type: string
+        default: '["ubuntu-latest"]'
+      extra-check-script:
+        description: Repository script run in the lint job after the lint recipe.
+        type: string
+        default: ""
+      harness-ref:
+        description: Ref of IronFlock/workflows the harness scripts are taken from.
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: go
+        env:
+          WD: ${{ inputs.working-directory }}
+          GVF: ${{ inputs.go-version-file }}
+        run: echo "version-file=${GVF:-$WD/go.mod}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version == '' && steps.go.outputs.version-file || '' }}
+          cache: ${{ hashFiles(format('{0}/go.sum', inputs.working-directory)) != '' }}
+          cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: "1.59.0"
+      - name: just ${{ inputs.lint-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.lint-recipe }}
+        run: just "$RECIPE"
+      - name: extra check
+        if: inputs.extra-check-script != ''
+        env:
+          SCRIPT: ${{ inputs.extra-check-script }}
+        run: '"./$SCRIPT"'
+
+  unit:
+    name: unit (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: go
+        env:
+          WD: ${{ inputs.working-directory }}
+          GVF: ${{ inputs.go-version-file }}
+        run: echo "version-file=${GVF:-$WD/go.mod}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version == '' && steps.go.outputs.version-file || '' }}
+          cache: ${{ hashFiles(format('{0}/go.sum', inputs.working-directory)) != '' }}
+          cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: "1.59.0"
+      - name: just ${{ inputs.setup-recipe }}
+        if: inputs.setup-recipe != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.setup-recipe }}
+        run: just "$RECIPE"
+      - name: just ${{ inputs.test-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.test-recipe }}
+        run: just "$RECIPE"
+
+  targets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      json: ${{ steps.t.outputs.json }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.targets == '' && inputs.targets-file != ''
+        with:
+          persist-credentials: false
+          sparse-checkout: ${{ inputs.targets-file }}
+          sparse-checkout-cone-mode: false
+      - id: t
+        env:
+          TARGETS: ${{ inputs.targets }}
+          TARGETS_FILE: ${{ inputs.targets-file }}
+          BUILD_RECIPE: ${{ inputs.build-recipe }}
+        run: |
+          if [ -z "$TARGETS" ] && [ -n "$TARGETS_FILE" ]; then
+            TARGETS=$(cat "$TARGETS_FILE")
+          fi
+          if [ -n "$TARGETS" ]; then
+            json=$(printf '%s\n' "$TARGETS" | jq -R -s -c 'split("\n") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          elif [ -n "$BUILD_RECIPE" ]; then
+            json='[""]'
+          else
+            json='[]'
+          fi
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+          echo "build matrix: $json"
+
+  build:
+    name: build${{ matrix.target != '' && format(' {0}', matrix.target) || '' }}
+    needs: targets
+    if: needs.targets.outputs.json != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.json) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - id: go
+        env:
+          WD: ${{ inputs.working-directory }}
+          GVF: ${{ inputs.go-version-file }}
+        run: echo "version-file=${GVF:-$WD/go.mod}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version == '' && steps.go.outputs.version-file || '' }}
+          cache: ${{ hashFiles(format('{0}/go.sum', inputs.working-directory)) != '' }}
+          cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: "1.59.0"
+      - name: just ${{ inputs.build-setup-recipe }}
+        if: inputs.build-setup-recipe != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.build-setup-recipe }}
+        run: just "$RECIPE"
+      - name: cross-build ${{ matrix.target }}
+        if: matrix.target != ''
+        env:
+          TARGET: ${{ matrix.target }}
+          WD: ${{ inputs.working-directory }}
+          CMD: ${{ inputs.cross-build-command }}
+        run: |
+          if [ -n "$CMD" ]; then
+            bash -c "$CMD"
+          else
+            "$HARNESS/scripts/cross-build.sh" "$WD" "$TARGET"
+          fi
+      - name: just ${{ inputs.build-recipe }}
+        if: matrix.target == ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.build-recipe }}
+        run: just "$RECIPE"

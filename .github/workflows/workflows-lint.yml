@@ -1,0 +1,88 @@
+# Reusable lint of a repository's own GitHub Actions workflows:
+#   actionlint   syntax, expressions, shellcheck of run: blocks
+#   zizmor       security audits (template injection, credential persistence,
+#                unpinned actions, dangerous triggers, ...), medium and above
+#   pinact       every third-party action pinned to a full commit SHA with a
+#                version comment (IronFlock/* may use a tag)
+# Blocking: the job fails on any finding unless `report-only` is set.
+name: workflows-lint
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Directory holding the workflow files.
+        type: string
+        default: .github/workflows
+      report-only:
+        type: boolean
+        default: false
+      harness-ref:
+        type: string
+        default: v1
+    outputs:
+      findings:
+        description: JSON object with the failing tools.
+        value: ${{ jobs.lint.outputs.findings }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      findings: ${{ steps.lint.outputs.findings }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - run: '"$HARNESS/scripts/install-tool.sh" actionlint zizmor pinact shellcheck'
+      - name: actionlint, zizmor, pinact
+        id: lint
+        env:
+          WF_PATH: ${{ inputs.path }}
+          REPORT_ONLY: ${{ inputs.report-only }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t files < <(find "$WF_PATH" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no workflow files under $WF_PATH"
+            echo 'findings={}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          declare -A failed=()
+          echo "## Workflow lint" >> "$GITHUB_STEP_SUMMARY"
+          echo "::group::actionlint"
+          actionlint -shellcheck "$(command -v shellcheck)" "${files[@]}" || failed[actionlint]=1
+          echo "::endgroup::"
+          echo "::group::zizmor"
+          zizmor --config "$HARNESS/zizmor.yml" --min-severity medium --format plain "${files[@]}" || failed[zizmor]=1
+          echo "::endgroup::"
+          echo "::group::pinact"
+          pinact run --config "$HARNESS/.pinact.yaml" --fix=false --no-api "${files[@]}" || failed[pinact]=1
+          echo "::endgroup::"
+          for tool in actionlint zizmor pinact; do
+            echo "- $tool: ${failed[$tool]:+findings}${failed[$tool]:-clean}" >> "$GITHUB_STEP_SUMMARY"
+          done
+          json=$(for k in "${!failed[@]}"; do printf '"%s":1\n' "$k"; done | paste -sd, -)
+          echo "findings={${json}}" >> "$GITHUB_OUTPUT"
+          if [ "${#failed[@]}" -gt 0 ] && [ "$REPORT_ONLY" != true ]; then
+            echo "::error::workflow lint failed: ${!failed[*]}"
+            exit 1
+          fi

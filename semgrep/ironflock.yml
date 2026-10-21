@@ -1,0 +1,75 @@
+# Organisation rules, run next to semgrep's p/default ruleset.
+# Purpose: no secret, token or password hash in browser consoles or server logs.
+# Suppress a reviewed false positive with `// nosemgrep: <rule-id>` and a reason.
+rules:
+  - id: ironflock.js-log-secret-env
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      A secret-looking environment value is written to the console. Browser
+      consoles are recorded by session replay and server consoles end up in logs.
+    patterns:
+      - pattern-either:
+          - pattern: console.$F(..., process.env.$V, ...)
+          - pattern: console.$F(..., process.env[$V], ...)
+          - pattern: console.$F(..., `...${process.env.$V}...`, ...)
+      - metavariable-regex:
+          metavariable: $F
+          regex: ^(log|info|warn|error|debug|trace|dir|table)$
+      - metavariable-regex:
+          metavariable: $V
+          regex: (?i).*(secret|token|passw|api_?key|private|credential|cookie|cipher).*
+
+  - id: ironflock.js-log-credential
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      A credential-named value is written to the console. Log the fact (present,
+      length, id), never the value.
+    patterns:
+      - pattern-either:
+          - pattern: console.$F(..., $X, ...)
+          - pattern: console.$F(..., $O.$X, ...)
+          - pattern: 'console.$F(..., { ..., $X: $Y, ... }, ...)'
+      - metavariable-regex:
+          metavariable: $F
+          regex: ^(log|info|warn|error|debug|trace|dir|table)$
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?i)^(password|passwd|password_?hash|secret|client_?secret|token|access_?token|refresh_?token|session_?token|id_?token|api_?key|private_?key|totp_?secret|recovery_?code)$
+
+  - id: ironflock.go-log-secret
+    languages: [go]
+    severity: ERROR
+    message: >-
+      A secret-looking value is written to a log or stdout. Log the fact
+      (present, length, id), never the value.
+    patterns:
+      - pattern-either:
+          - pattern: log.$F(..., os.Getenv($K), ...)
+          - pattern: fmt.$F(..., os.Getenv($K), ...)
+          - pattern: $L.$F(..., os.Getenv($K), ...)
+      - metavariable-regex:
+          metavariable: $F
+          regex: ^(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Info|Infof|Warn|Warnf|Error|Errorf|Debug|Debugf)$
+      - metavariable-regex:
+          metavariable: $K
+          regex: (?i)"[^"]*(secret|token|passw|api_?key|private|credential)[^"]*"
+
+  - id: ironflock.python-log-secret
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A secret-looking environment value is written to a log or stdout. Log the
+      fact (present, length, id), never the value.
+    patterns:
+      - pattern-either:
+          - pattern: print(..., os.environ[$K], ...)
+          - pattern: print(..., os.getenv($K, ...), ...)
+          - pattern: print(..., os.environ.get($K, ...), ...)
+          - pattern: $LOG.$F(..., os.environ[$K], ...)
+          - pattern: $LOG.$F(..., os.getenv($K, ...), ...)
+          - pattern: $LOG.$F(..., os.environ.get($K, ...), ...)
+      - metavariable-regex:
+          metavariable: $K
+          regex: (?i)["'][^"']*(secret|token|passw|api_?key|private|credential)[^"']*["']

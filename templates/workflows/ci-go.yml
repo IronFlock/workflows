@@ -1,0 +1,26 @@
+# Caller template for a Go repository: gate + workflow lint.
+# Copy to .github/workflows/ci.yml and adjust the `with:` block.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gate:
+    uses: IronFlock/workflows/.github/workflows/go-gate.yml@v1
+    with:
+      working-directory: .
+      targets-file: targets
+
+  workflows:
+    uses: IronFlock/workflows/.github/workflows/workflows-lint.yml@v1

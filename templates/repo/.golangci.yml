@@ -1,0 +1,17 @@
+# golangci-lint v2 configuration (run by `just lint`).
+version: "2"
+
+run:
+  # Lint the integration suites too: they build only with this tag.
+  build-tags:
+    - integration
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - gosec
+
+formatters:
+  enable:
+    - gofmt

@@ -1,0 +1,7 @@
+# pinact configuration used by workflows-lint.yml for every calling repository.
+version: 3
+rules:
+  # Our own reusable workflows are called by the moving major tag (@v1).
+  - ignore: true
+    conditions:
+      - expr: ActionRepoOwner == "IronFlock"

@@ -1,0 +1,11 @@
+# Planted for the harness self-test: an action pinned to a branch and an
+# untrusted value expanded inside a shell script. workflows-lint must flag both.
+name: bad
+on: push
+permissions: {}
+jobs:
+  bad:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+      - run: echo "${{ github.event.head_commit.message }}"

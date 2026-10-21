@@ -1,0 +1,12 @@
+# Recipe contract of a Go repository, in its smallest form.
+
+lint:
+    test -z "$(gofmt -l .)"
+    go mod tidy -diff
+    go vet ./...
+
+test:
+    go test -race -shuffle=on -count=1 ./...
+
+build:
+    go build -o /dev/null .

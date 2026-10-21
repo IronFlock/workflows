@@ -1,0 +1,163 @@
+# Self-test of the harness. Runs the reusable workflows at this commit against
+# the fixtures in tests/fixtures:
+#   positive controls  go-pass passes the gate and the scan with every fail-on
+#                      category set; this repository's own workflows lint clean
+#   negative controls  planted findings (fake key, reachable vulnerable call,
+#                      secret logged to the console, root container, unpinned
+#                      action, failing test) are each reported
+# Negative controls run report-only and are asserted from the outputs, so the
+# self-test is green exactly when every planted finding is detected.
+# `v1` is advanced only to a commit whose self-test is green.
+name: selftest
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly: scanner databases and rule sets change without a commit here.
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selftest-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint-self:
+    uses: ./.github/workflows/workflows-lint.yml
+    with:
+      harness-ref: ${{ github.sha }}
+
+  lint-templates:
+    uses: ./.github/workflows/workflows-lint.yml
+    with:
+      path: templates/workflows
+      harness-ref: ${{ github.sha }}
+
+  lint-planted:
+    uses: ./.github/workflows/workflows-lint.yml
+    with:
+      path: tests/fixtures/workflows-bad/.github/workflows
+      report-only: true
+      harness-ref: ${{ github.sha }}
+
+  scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: scripts/install-tool.sh shellcheck
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+      - name: sarif-summary unit tests
+        run: python3 -I scripts/test_sarif_summary.py
+      # Public repository: no internal document names or plan IDs.
+      - name: public-repo hygiene
+        run: |
+          if git grep -n -I -E 'INTERNAL-|WP-[0-9]{2}(-[0-9]{2})?\b' -- . ':!.github/workflows/selftest.yml'; then
+            echo "::error::internal references found"
+            exit 1
+          fi
+
+  gate-pass:
+    uses: ./.github/workflows/go-gate.yml
+    with:
+      working-directory: tests/fixtures/go-pass
+      go-version: stable
+      targets: |
+        linux/amd64
+        linux/arm64
+        linux/arm/7
+        windows/amd64
+        darwin/arm64
+      harness-ref: ${{ github.sha }}
+
+  gate-fail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: "1.59.0"
+      - name: the planted failing test must fail `just test`
+        working-directory: tests/fixtures/go-fail
+        run: |
+          if just test; then
+            echo "::error::just test passed although a test fails"
+            exit 1
+          fi
+          echo "just test failed as expected"
+
+  security-clean:
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      working-directory: tests/fixtures/go-pass
+      scan-path: tests/fixtures/go-pass
+      languages: go
+      go-version: stable
+      gitleaks-mode: dir
+      fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error
+      code-scanning: false
+      harness-ref: ${{ github.sha }}
+
+  security-planted:
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      working-directory: tests/fixtures/planted
+      scan-path: tests/fixtures/planted
+      languages: go
+      go-version: stable
+      gitleaks-mode: dir
+      image: true
+      dockerfile: tests/fixtures/planted/Dockerfile
+      context: tests/fixtures/planted
+      image-on: pull_request,push,schedule,workflow_dispatch
+      code-scanning: false
+      harness-ref: ${{ github.sha }}
+
+  assert-planted:
+    needs: [security-planted, lint-planted]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every planted finding was reported
+        env:
+          FINDINGS: ${{ needs.security-planted.outputs.findings }}
+          LINT: ${{ needs.lint-planted.outputs.findings }}
+        run: |
+          echo "security: $FINDINGS"
+          echo "workflow lint: $LINT"
+          fail=0
+          for cat in secrets vuln-high misconfig-high semgrep-error; do
+            n=$(jq -r --arg c "$cat" '.[$c] // 0' <<<"$FINDINGS")
+            if [ "$n" -lt 1 ]; then echo "::error::no $cat finding in the planted fixture"; fail=1; fi
+          done
+          for tool in zizmor pinact; do
+            if [ "$(jq -r --arg t "$tool" '.[$t] // 0' <<<"$LINT")" != 1 ]; then
+              echo "::error::$tool did not flag the planted workflow"; fail=1
+            fi
+          done
+          exit "$fail"
