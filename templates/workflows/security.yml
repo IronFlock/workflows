@@ -26,5 +26,7 @@ jobs:
       security-events: write
     with:
       languages: go
+      # gosec in `just lint` covers Go; semgrep runs the IronFlock rules only.
+      semgrep-rulesets: ""
       # image: true          build and scan the Dockerfile
       # fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error

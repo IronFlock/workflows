@@ -161,6 +161,14 @@ class ReportTests(Base):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("deps", proc.stdout)
 
+    def test_cancelled_scanner_job_is_incomplete(self):
+        c = self.case()
+        proc, _ = c.report("", jobs={"image": {"result": "cancelled"}, "deps": {"result": "success"}})
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("image", proc.stdout)
+        proc, _ = c.report("", jobs={"image": {"result": "skipped"}, "deps": {"result": "success"}})
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+
     def test_unknown_category_is_rejected(self):
         proc, _ = self.case().report("vuln-medium")
         self.assertEqual(proc.returncode, 2)

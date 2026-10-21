@@ -69,8 +69,11 @@ repository-local `integration` job next to the gate.
 - Vulnerabilities count only when a fixed version exists (trivy
   `--ignore-unfixed`); govulncheck findings count as high only when the
   vulnerable code is reachable.
-- A scanner job that fails (rather than finds something) always fails `report`:
-  an incomplete scan is not a pass.
+- A scanner job that fails or is cancelled (rather than finds something) always
+  fails `report`: an incomplete scan is not a pass.
+- semgrep runs the IronFlock rules plus `semgrep-rulesets` (default `p/default`).
+  Go repositories, whose `just lint` runs gosec, set `semgrep-rulesets: ""` so each
+  finding is reported (and annotated) once.
 
 Every run writes a summary table to the job summary and keeps the raw reports
 as artifacts (`security-findings-*`, `security-sbom`) for 90 days. A workflow that

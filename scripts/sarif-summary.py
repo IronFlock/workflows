@@ -263,10 +263,11 @@ def cmd_report(args):
         blocking_cats.add("vuln-critical")
     blocking = sum(counts[c] for c in blocking_cats)
 
+    # A cancelled job (e.g. a timeout) left the scan incomplete, just like a failed one.
     failed_jobs = []
     if args.jobs:
         for name, job in json.loads(args.jobs).items():
-            if (job or {}).get("result") == "failure":
+            if (job or {}).get("result") in ("failure", "cancelled"):
                 failed_jobs.append(name)
 
     expiring = []
@@ -290,7 +291,7 @@ def cmd_report(args):
         if counts[c] or c in FAIL_CATEGORIES:
             lines.append(f"| {c} | {counts[c]} | {'yes' if c in blocking_cats and counts[c] else ''} |")
     if failed_jobs:
-        lines += ["", f"**Scanner job(s) failed:** {', '.join(sorted(failed_jobs))} — the scan is incomplete."]
+        lines += ["", f"**Scanner job(s) failed or were cancelled:** {', '.join(sorted(failed_jobs))} — the scan is incomplete."]
     if findings:
         lines += ["", "### Findings (first 50)", "", "| Category | Tool | Rule | Location | Message |", "|---|---|---|---|---|"]
         for f in sorted(findings, key=lambda x: (ORDER.index(x["category"]), x["tool"], x["rule"]))[:50]:
@@ -311,7 +312,7 @@ def cmd_report(args):
             fh.write(f"findings={json.dumps(counts, separators=(',', ':'))}\n")
             fh.write(f"blocking={blocking}\n")
     if failed_jobs:
-        print(f"::error::scanner job(s) failed: {', '.join(sorted(failed_jobs))}")
+        print(f"::error::scanner job(s) failed or were cancelled: {', '.join(sorted(failed_jobs))}")
         return 1
     if blocking:
         print(f"::error::{blocking} blocking finding(s) in: {', '.join(sorted(c for c in blocking_cats if counts[c]))}")
