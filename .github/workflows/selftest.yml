@@ -113,6 +113,7 @@ jobs:
     with:
       working-directory: tests/fixtures/go-pass
       scan-path: tests/fixtures/go-pass
+      artifact-prefix: clean
       languages: go
       go-version: stable
       gitleaks-mode: dir
@@ -128,6 +129,7 @@ jobs:
     with:
       working-directory: tests/fixtures/planted
       scan-path: tests/fixtures/planted
+      artifact-prefix: planted
       languages: go
       go-version: stable
       gitleaks-mode: dir
@@ -140,6 +142,8 @@ jobs:
 
   assert-planted:
     needs: [security-planted, lint-planted]
+    # Also when a scanner job broke: the counts then show what is missing.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -73,7 +73,8 @@ repository-local `integration` job next to the gate.
   an incomplete scan is not a pass.
 
 Every run writes a summary table to the job summary and keeps the raw reports
-as artifacts (`findings-*`, `sbom`) for 90 days. Public repositories also get
+as artifacts (`security-findings-*`, `security-sbom`) for 90 days. A workflow that
+calls `security.yml` more than once per run gives each call its own `artifact-prefix`. Public repositories also get
 the results in their Security tab.
 
 ## Exceptions

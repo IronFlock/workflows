@@ -100,6 +100,10 @@ on:
           misconfig-high, license-forbidden, semgrep-error. Empty = report-only.
         type: string
         default: ""
+      artifact-prefix:
+        description: Prefix of the artifact names; set a distinct one per call when a workflow calls this more than once.
+        type: string
+        default: security
       code-scanning:
         description: Upload results to the Security tab on public repositories.
         type: boolean
@@ -156,8 +160,8 @@ jobs:
         env:
           MODE: ${{ inputs.gitleaks-mode }}
           SCAN_PATH: ${{ inputs.scan-path }}
-          GITLEAKS_CONFIG: ${{ inputs.gitleaks-config }}
-          GITLEAKS_BASELINE: ${{ inputs.gitleaks-baseline }}
+          GL_CONFIG: ${{ inputs.gitleaks-config }}
+          GL_BASELINE: ${{ inputs.gitleaks-baseline }}
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -165,7 +169,7 @@ jobs:
         run: '"$HARNESS/scripts/gitleaks-scan.sh" "$MODE" "$SCAN_PATH" "$RUNNER_TEMP/findings/gitleaks.sarif"'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: findings-gitleaks
+          name: ${{ inputs.artifact-prefix }}-findings-gitleaks
           path: ${{ runner.temp }}/findings
           retention-days: 90
       - id: cs
@@ -250,7 +254,7 @@ jobs:
           esac
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: findings-deps
+          name: ${{ inputs.artifact-prefix }}-findings-deps
           path: ${{ runner.temp }}/findings
           retention-days: 90
       - id: cs
@@ -298,7 +302,7 @@ jobs:
             --sarif --output "$RUNNER_TEMP/findings/semgrep.sarif" "$SCAN_PATH"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: findings-semgrep
+          name: ${{ inputs.artifact-prefix }}-findings-semgrep
           path: ${{ runner.temp }}/findings
           retention-days: 90
       - id: cs
@@ -371,7 +375,7 @@ jobs:
           trivy fs --quiet --format cyclonedx --output "$RUNNER_TEMP/sbom/sbom.cdx.json" "$WD"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: sbom
+          name: ${{ inputs.artifact-prefix }}-sbom
           path: ${{ runner.temp }}/sbom
           if-no-files-found: error
           retention-days: 90
@@ -409,7 +413,7 @@ jobs:
           trivy config "${args[@]}" "$SCAN_PATH"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: findings-config
+          name: ${{ inputs.artifact-prefix }}-findings-config
           path: ${{ runner.temp }}/findings
           retention-days: 90
       - id: cs
@@ -472,7 +476,7 @@ jobs:
           trivy fs "${args[@]}" "$SCAN_PATH"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: findings-licenses
+          name: ${{ inputs.artifact-prefix }}-findings-licenses
           path: ${{ runner.temp }}/findings
           retention-days: 90
 
@@ -527,7 +531,7 @@ jobs:
           rm -f "$RUNNER_TEMP/image.tar"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: findings-image
+          name: ${{ inputs.artifact-prefix }}-findings-image
           path: ${{ runner.temp }}/findings
           retention-days: 90
       - id: cs
@@ -566,7 +570,7 @@ jobs:
           echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: findings-*
+          pattern: ${{ inputs.artifact-prefix }}-findings-*
           path: ${{ runner.temp }}/findings
       - name: summarise and apply fail-on
         id: report

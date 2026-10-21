@@ -5,7 +5,9 @@
 # mode: auto  pull_request -> commits of the PR; push -> pushed commits;
 #             anything else (schedule, dispatch) -> the files at HEAD
 #       dir   the files under <path>
-# Optional env: GITLEAKS_CONFIG, GITLEAKS_BASELINE (used when the file exists),
+# Optional env: GL_CONFIG, GL_BASELINE (used when the file exists; not named
+# GITLEAKS_CONFIG because gitleaks reads that variable itself and fails when
+# the file is missing),
 # EVENT_NAME, BASE_SHA, HEAD_SHA, BEFORE_SHA.
 set -euo pipefail
 
@@ -14,11 +16,11 @@ path=$2
 out=$3
 
 args=(--no-banner --redact --exit-code 0 --report-format sarif --report-path "$out")
-if [ -n "${GITLEAKS_CONFIG:-}" ] && [ -f "$GITLEAKS_CONFIG" ]; then
-  args+=(--config "$GITLEAKS_CONFIG")
+if [ -n "${GL_CONFIG:-}" ] && [ -f "$GL_CONFIG" ]; then
+  args+=(--config "$GL_CONFIG")
 fi
-if [ -n "${GITLEAKS_BASELINE:-}" ] && [ -f "$GITLEAKS_BASELINE" ]; then
-  args+=(--baseline-path "$GITLEAKS_BASELINE")
+if [ -n "${GL_BASELINE:-}" ] && [ -f "$GL_BASELINE" ]; then
+  args+=(--baseline-path "$GL_BASELINE")
 fi
 
 range=""
