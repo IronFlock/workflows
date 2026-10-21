@@ -1,0 +1,278 @@
+# Reusable release of a container image, triggered by a version tag.
+#
+#   verify   the tag equals <tag-prefix><version file>, and that tag does not
+#            exist in the registry yet (released images are never overwritten)
+#   build    one native build per platform (no QEMU), pushed by digest, with
+#            BuildKit SBOM + SLSA provenance attestations attached
+#   publish  one multi-arch index tagged <tag> and `latest`; SBOM artifact,
+#            digest in the job summary
+#
+# Push credentials come from GCP Workload Identity Federation: no key is
+# stored anywhere. The identity provider grants the publisher service account
+# only to tag runs of the calling repository through this workflow, so pull
+# requests, branches and other workflows cannot push.
+#
+# Run anywhere except on a matching tag (e.g. workflow_dispatch on a branch),
+# the workflow is a dry run: it verifies and builds every platform, and pushes
+# nothing.
+#
+# Callers run their gate and blocking security scan first (`needs:`), and grant
+#   permissions: { contents: read, id-token: write }
+name: release-image
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Full image name without tag, e.g. europe-docker.pkg.dev/<project>/<repo>/<name>.
+        type: string
+        required: true
+      version-file:
+        description: File holding the version (one line, without the tag prefix).
+        type: string
+        required: true
+      tag-prefix:
+        type: string
+        default: v
+      dockerfile:
+        type: string
+        default: Dockerfile
+      context:
+        type: string
+        default: "."
+      build-args:
+        description: Newline-separated KEY=VALUE build arguments.
+        type: string
+        default: ""
+      platforms:
+        description: >-
+          JSON list of {"platform": ..., "runner": ...}. Native runners per
+          architecture keep builds fast; a runner of another architecture falls
+          back to QEMU emulation.
+        type: string
+        default: '[{"platform":"linux/amd64","runner":"ubuntu-24.04"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]'
+      latest:
+        description: Also move the `latest` tag to this release.
+        type: boolean
+        default: true
+      workload-identity-provider:
+        description: Full resource name of the GCP workload identity provider.
+        type: string
+        required: true
+      service-account:
+        description: Publisher service account (email).
+        type: string
+        required: true
+    outputs:
+      digest:
+        description: Digest of the published multi-arch index (empty in a dry run).
+        value: ${{ jobs.publish.outputs.digest }}
+      tag:
+        value: ${{ jobs.verify.outputs.tag }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      push: ${{ steps.version.outputs.push }}
+      registry: ${{ steps.version.outputs.registry }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: tag = version file
+        id: version
+        env:
+          VERSION_FILE: ${{ inputs.version-file }}
+          PREFIX: ${{ inputs.tag-prefix }}
+          IMAGE: ${{ inputs.image }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=$(tr -d '[:space:]' < "$VERSION_FILE")
+          [ -n "$version" ] || { echo "::error::$VERSION_FILE is empty"; exit 1; }
+          tag="${PREFIX}${version}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "registry=${IMAGE%%/*}" >> "$GITHUB_OUTPUT"
+          if [ "$REF_TYPE" = tag ]; then
+            if [ "$REF_NAME" != "$tag" ]; then
+              echo "::error::tag $REF_NAME does not match $VERSION_FILE ($tag)"
+              exit 1
+            fi
+            echo "push=true" >> "$GITHUB_OUTPUT"
+            echo "release $IMAGE:$tag"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::dry run on $REF_TYPE $REF_NAME: builds $IMAGE:$tag, pushes nothing"
+          fi
+      - id: auth
+        if: steps.version.outputs.push == 'true'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ inputs.workload-identity-provider }}
+          service_account: ${{ inputs.service-account }}
+          token_format: access_token
+          access_token_lifetime: 300s
+      - name: the tag is not in the registry yet
+        if: steps.version.outputs.push == 'true'
+        env:
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+          REGISTRY: ${{ steps.version.outputs.registry }}
+          IMAGE: ${{ inputs.image }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY"
+          if docker buildx imagetools inspect "$IMAGE:$TAG" >/dev/null 2>&1; then
+            echo "::error::$IMAGE:$TAG already exists; released images are never overwritten — release a new version"
+            exit 1
+          fi
+          docker logout "https://$REGISTRY"
+
+  build:
+    needs: verify
+    name: build ${{ matrix.platform }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJSON(inputs.platforms) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: auth
+        if: needs.verify.outputs.push == 'true'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ inputs.workload-identity-provider }}
+          service_account: ${{ inputs.service-account }}
+          token_format: access_token
+          access_token_lifetime: 3600s
+      - name: build ${{ matrix.platform }}${{ needs.verify.outputs.push == 'true' && ' and push by digest' || ' (dry run)' }}
+        id: build
+        env:
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+          REGISTRY: ${{ needs.verify.outputs.registry }}
+          PUSH: ${{ needs.verify.outputs.push }}
+          IMAGE: ${{ inputs.image }}
+          PLATFORM: ${{ matrix.platform }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.context }}
+          BUILD_ARGS: ${{ inputs.build-args }}
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+          REVISION: ${{ github.sha }}
+          VERSION: ${{ needs.verify.outputs.tag }}
+        run: |
+          args=(--platform "$PLATFORM" -f "$DOCKERFILE"
+                --label "org.opencontainers.image.source=$SOURCE_URL"
+                --label "org.opencontainers.image.revision=$REVISION"
+                --label "org.opencontainers.image.version=$VERSION"
+                --metadata-file "$RUNNER_TEMP/metadata.json")
+          while IFS= read -r arg; do
+            [ -n "$arg" ] && args+=(--build-arg "$arg")
+          done <<<"$BUILD_ARGS"
+          if [ "$PUSH" = true ]; then
+            echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY"
+            args+=(--sbom=true --provenance=mode=max
+                   --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true")
+          else
+            args+=(--output type=cacheonly)
+          fi
+          docker buildx build "${args[@]}" "$CONTEXT"
+          if [ "$PUSH" = true ]; then
+            digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")
+            echo "pushed $IMAGE@$digest"
+            mkdir -p "$RUNNER_TEMP/digests"
+            touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+            docker logout "https://$REGISTRY"
+          fi
+          echo "artifact=digest-$(echo "$PLATFORM" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.verify.outputs.push == 'true'
+        with:
+          name: ${{ steps.build.outputs.artifact }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [verify, build]
+    if: needs.verify.outputs.push == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      digest: ${{ steps.index.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ inputs.workload-identity-provider }}
+          service_account: ${{ inputs.service-account }}
+          token_format: access_token
+          access_token_lifetime: 600s
+      - name: multi-arch index ${{ needs.verify.outputs.tag }}
+        id: index
+        env:
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+          REGISTRY: ${{ needs.verify.outputs.registry }}
+          IMAGE: ${{ inputs.image }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          LATEST: ${{ inputs.latest }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY"
+          refs=()
+          for f in "$RUNNER_TEMP"/digests/*; do refs+=("$IMAGE@sha256:$(basename "$f")"); done
+          want=$(jq length <<<"$PLATFORMS")
+          [ "${#refs[@]}" -eq "$want" ] || { echo "::error::expected $want platform digests, got ${#refs[@]}"; exit 1; }
+          tags=(-t "$IMAGE:$TAG")
+          if [ "$LATEST" = true ]; then tags+=(-t "$IMAGE:latest"); fi
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/sbom"
+          docker buildx imagetools inspect "$IMAGE@$digest" --format '{{json .SBOM}}' > "$RUNNER_TEMP/sbom/sbom.spdx.json"
+          docker buildx imagetools inspect "$IMAGE:$TAG"
+          docker logout "https://$REGISTRY"
+          {
+            echo "## Released $IMAGE:$TAG"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| index digest | \`$digest\` |"
+            echo "| platforms | $(jq -r 'map(.platform) | join(", ")' <<<"$PLATFORMS") |"
+            echo "| attestations | SBOM (SPDX) + SLSA provenance attached to the image |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-sbom
+          path: ${{ runner.temp }}/sbom
+          if-no-files-found: error
+          retention-days: 90

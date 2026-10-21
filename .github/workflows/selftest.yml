@@ -140,6 +140,21 @@ jobs:
       code-scanning: false
       harness-ref: ${{ github.sha }}
 
+  # Dry run of the release workflow (not on a tag: builds both platforms
+  # natively, pushes nothing, needs no credentials).
+  release-dry-run:
+    uses: ./.github/workflows/release-image.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      image: example.invalid/selftest/release
+      version-file: tests/fixtures/release/version.txt
+      dockerfile: tests/fixtures/release/Dockerfile
+      context: tests/fixtures/release
+      workload-identity-provider: dry-run-unused
+      service-account: dry-run-unused
+
   assert-planted:
     needs: [security-planted, lint-planted]
     # Also when a scanner job broke: the counts then show what is missing.
