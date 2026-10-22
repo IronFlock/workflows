@@ -180,3 +180,19 @@ jobs:
             fi
           done
           exit "$fail"
+
+  # The required check of the main-branch ruleset: green only when every job
+  # above succeeded (skipped or cancelled counts as failed).
+  selftest-ok:
+    if: ${{ always() }}
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, security-clean, security-planted, release-dry-run, assert-planted]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: all self-test jobs succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+
