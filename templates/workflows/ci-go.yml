@@ -24,3 +24,19 @@ jobs:
 
   workflows:
     uses: IronFlock/workflows/.github/workflows/workflows-lint.yml@v1
+
+  # The one required check of the main-branch ruleset: green only when every
+  # job above succeeded (skipped or cancelled counts as failed).
+  ci-ok:
+    if: ${{ always() }}
+    needs: [gate, workflows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: all ci jobs succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+

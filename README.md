@@ -43,6 +43,7 @@ The inputs of each workflow are documented in its `on.workflow_call` block.
 | [go-gate.yml](.github/workflows/go-gate.yml) | `lint`, `unit`, `build` | Go gate; cross-build matrix from `targets` / `targets-file` |
 | [security.yml](.github/workflows/security.yml) | `gitleaks`, `deps`, `semgrep`, `sbom`, `config`, `licenses`, `image`, `report` | security screening; `report` applies `fail-on` |
 | [workflows-lint.yml](.github/workflows/workflows-lint.yml) | `lint` | actionlint, zizmor, pinact on the caller's workflows; always blocking |
+| [release-image.yml](.github/workflows/release-image.yml) | `verify`, `build`, `publish` | release of a container image from a version tag: only commits on the protected `main`; native multi-arch build, SBOM + provenance attached, keyless push |
 | [selftest.yml](.github/workflows/selftest.yml) | — | proves the harness against [tests/fixtures](tests/fixtures) |
 
 Gates for Node, Python and chart/shell repositories follow the same pattern
@@ -79,6 +80,16 @@ Every run writes a summary table to the job summary and keeps the raw reports
 as artifacts (`security-findings-*`, `security-sbom`) for 90 days. A workflow that
 calls `security.yml` more than once per run gives each call its own `artifact-prefix`. Public repositories also get
 the results in their Security tab.
+
+## Protected main branch
+
+Each repository protects `main` with a ruleset: changes only through pull
+requests, which must be up to date with `main` and pass the required checks
+`ci-ok` and `security / report`; no force pushes, no deletion, no bypass. So
+every commit on `main` is green, and `release-image.yml` only checks that the
+tagged commit is on `main`. `ci-ok` is a small job at the end of the caller's
+`ci.yml` that succeeds only when every other job in it succeeded (see
+[templates/workflows/ci-go.yml](templates/workflows/ci-go.yml)).
 
 ## Exceptions
 

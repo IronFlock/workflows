@@ -1,7 +1,12 @@
 # Reusable release of a container image, triggered by a version tag.
 #
-#   verify   the tag equals <tag-prefix><version file>, and that tag does not
-#            exist in the registry yet (released images are never overwritten)
+#   verify   the tag equals <tag-prefix><version file>; the tagged commit is
+#            part of the release branch (main); the tag does not exist in the
+#            registry yet (released images are never overwritten)
+#
+# Checks are not repeated here: the release branch is protected by a ruleset
+# that only accepts pull requests whose required checks (ci-ok, security /
+# report) passed, so every commit on it is green.
 #   build    one native build per platform (no QEMU), pushed by digest, with
 #            BuildKit SBOM + SLSA provenance attestations attached
 #   publish  one multi-arch index tagged <tag> and `latest`; SBOM artifact,
@@ -9,14 +14,15 @@
 #
 # Push credentials come from GCP Workload Identity Federation: no key is
 # stored anywhere. The identity provider grants the publisher service account
-# only to tag runs of the calling repository through this workflow, so pull
-# requests, branches and other workflows cannot push.
+# only to tag runs of an allowed repository through this workflow, so pull
+# requests, branches and other workflows cannot push — and because the checks
+# above live in this file, no caller can release without them.
 #
 # Run anywhere except on a matching tag (e.g. workflow_dispatch on a branch),
 # the workflow is a dry run: it verifies and builds every platform, and pushes
 # nothing.
 #
-# Callers run their gate and blocking security scan first (`needs:`), and grant
+# Callers grant
 #   permissions: { contents: read, id-token: write }
 name: release-image
 
@@ -51,6 +57,10 @@ on:
           back to QEMU emulation.
         type: string
         default: '[{"platform":"linux/amd64","runner":"ubuntu-24.04"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]'
+      release-branch:
+        description: Only commits that are part of this branch are released.
+        type: string
+        default: main
       latest:
         description: Also move the `latest` tag to this release.
         type: boolean
@@ -92,6 +102,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: tag = version file
         id: version
         env:
@@ -117,6 +128,18 @@ jobs:
             echo "push=false" >> "$GITHUB_OUTPUT"
             echo "::notice::dry run on $REF_TYPE $REF_NAME: builds $IMAGE:$tag, pushes nothing"
           fi
+      - name: the commit is part of ${{ inputs.release-branch }}
+        if: steps.version.outputs.push == 'true'
+        env:
+          BRANCH: ${{ inputs.release-branch }}
+          SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          if ! git merge-base --is-ancestor "$SHA" "origin/$BRANCH"; then
+            echo "::error::commit $SHA is not part of $BRANCH — only commits merged through a pull request are released"
+            exit 1
+          fi
+          echo "$SHA is part of $BRANCH"
       - id: auth
         if: steps.version.outputs.push == 'true'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
