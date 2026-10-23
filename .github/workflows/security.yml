@@ -225,10 +225,9 @@ jobs:
           go-version-file: ${{ inputs.go-version == '' && steps.go.outputs.version-file || '' }}
           cache: ${{ hashFiles(format('{0}/go.sum', inputs.working-directory)) != '' }}
           cache-dependency-path: ${{ inputs.working-directory }}/go.sum
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: install just (tools.lock)
         if: contains(inputs.languages, 'go') && inputs.sarif-recipe != ''
-        with:
-          just-version: "1.59.0"
+        run: '"$HARNESS/scripts/install-tool.sh" just'
       - name: govulncheck
         if: contains(inputs.languages, 'go')
         env:
@@ -357,10 +356,9 @@ jobs:
           go-version-file: ${{ inputs.go-version == '' && steps.go.outputs.version-file || '' }}
           cache: ${{ hashFiles(format('{0}/go.sum', inputs.working-directory)) != '' }}
           cache-dependency-path: ${{ inputs.working-directory }}/go.sum
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: install just (tools.lock)
         if: contains(inputs.languages, 'go') && inputs.sbom-recipe != ''
-        with:
-          just-version: "1.59.0"
+        run: '"$HARNESS/scripts/install-tool.sh" just'
       - name: SBOM (Go)
         if: contains(inputs.languages, 'go')
         env:

@@ -15,4 +15,5 @@ actionlint  1.7.12  8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349
 zizmor      1.31.1  d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99  https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-x86_64-unknown-linux-gnu.tar.gz  zizmor
 pinact      5.0.0   d005bbb85da80dacdc07816f24a5da723a9f6d1e9f3d3e7e73df33f9caa1358f  https://github.com/suzuki-shunsuke/pinact/releases/download/v5.0.0/pinact_linux_amd64.tar.gz  pinact
 shellcheck  0.11.0  8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz  shellcheck-v0.11.0/shellcheck
+just        1.59.0  409044617b6f06517c1035e55ca38c8c856ff8b650e41bc2aa1ef82d5903a23e  https://github.com/casey/just/releases/download/1.59.0/just-1.59.0-x86_64-unknown-linux-musl.tar.gz  just
 kubeconform 0.8.0   9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz  kubeconform
