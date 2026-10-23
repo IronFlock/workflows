@@ -134,7 +134,13 @@ jobs:
           BRANCH: ${{ inputs.release-branch }}
           SHA: ${{ github.sha }}
         run: |
-          git fetch --no-tags origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          # fetch-depth 0 above already fetched every branch as origin/*, with
+          # the checkout's credentials. A second `git fetch` would run without
+          # them (persist-credentials: false) and fail on private repositories.
+          if ! git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null; then
+            echo "::error::origin/$BRANCH was not fetched by the checkout"
+            exit 1
+          fi
           if ! git merge-base --is-ancestor "$SHA" "origin/$BRANCH"; then
             echo "::error::commit $SHA is not part of $BRANCH — only commits merged through a pull request are released"
             exit 1
