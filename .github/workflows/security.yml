@@ -91,7 +91,7 @@ on:
         type: string
         default: ""
       image-on:
-        description: Events that build and scan the image. Public repositories scan on pull_request too.
+        description: Events that build and scan the image. Public repositories and release pull requests scan on pull_request too.
         type: string
         default: push,schedule,workflow_dispatch
       vex-file:
@@ -493,9 +493,14 @@ jobs:
           retention-days: 90
 
   image:
+    # Pull requests of private repositories skip the build (Actions minutes),
+    # except release pull requests: their title `release <name> v<x>` is held
+    # to a rising version by release-intent.yml, so the image that the merge
+    # publishes is scanned before the merge.
     if: >-
       inputs.image && (contains(inputs.image-on, github.event_name) ||
-      (github.event_name == 'pull_request' && !github.event.repository.private))
+      (github.event_name == 'pull_request' && (!github.event.repository.private ||
+      startsWith(github.event.pull_request.title, 'release '))))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

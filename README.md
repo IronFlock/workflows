@@ -79,6 +79,11 @@ repository-local `integration` job next to the gate.
 - semgrep runs the IronFlock rules plus `semgrep-rulesets` (default `p/default`).
   Go repositories, whose `just lint` runs gosec, set `semgrep-rulesets: ""` so each
   finding is reported (and annotated) once.
+- The container image (`image: true`) is built and scanned on the events in
+  `image-on`, and on every pull request of a public repository. Private
+  repositories skip the build on pull requests to save Actions minutes, except
+  on release pull requests (title `release <name> v<x>`): the image that the
+  merge publishes is scanned before the merge.
 
 Every run writes a summary table to the job summary and keeps the raw reports
 as artifacts (`security-findings-*`, `security-sbom`) for 90 days. A workflow that
