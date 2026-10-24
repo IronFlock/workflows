@@ -1,0 +1,200 @@
+# Reusable gate for Node/Bun repositories: lint, unit tests, build.
+#
+# Every logic step is a `just` recipe of the calling repository, so the gate
+# runs the same locally and in CI. `just` runs from `working-directory` and
+# finds the repository's Justfile upwards from there.
+#
+# Recipe contract (see README):
+#   lint   non-mutating static checks (tsc --noEmit, eslint where configured)
+#   test   hermetic unit tests
+#   build  the repository's artefact build, without publishing
+#
+# Dependencies come from the lockfile only: `bun install --frozen-lockfile`
+# or `npm ci`. With lockfile-check, a lockfile of the other package manager
+# fails the lint job, so local installs and CI cannot drift apart.
+#
+# Job names stay `lint` / `unit` / `build`, as in the other gates.
+name: node-gate
+
+on:
+  workflow_call:
+    inputs:
+      package-manager:
+        description: bun or npm.
+        type: string
+        required: true
+      working-directory:
+        description: Directory holding package.json and the lockfile; `just` runs from here.
+        type: string
+        default: "."
+      node-version:
+        description: Node.js version (also used by bun repositories for node-based tools).
+        type: string
+        default: "24.22.1"
+      skip:
+        description: Comma list of jobs to skip (lint, unit, build).
+        type: string
+        default: ""
+      lockfile-check:
+        description: Fail when a lockfile of the other package manager is present.
+        type: boolean
+        default: true
+      lint-recipe:
+        type: string
+        default: lint
+      test-recipe:
+        type: string
+        default: test
+      build-recipe:
+        type: string
+        default: build
+      harness-ref:
+        description: Ref of IronFlock/workflows the harness scripts are taken from.
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    if: ${{ !contains(inputs.skip, 'lint') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: lockfile check
+        if: inputs.lockfile-check
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PM: ${{ inputs.package-manager }}
+        run: '"$HARNESS/scripts/node-setup.sh" check-lockfile "$PM"'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager == 'npm' && 'npm' || '' }}
+          cache-dependency-path: ${{ inputs.package-manager == 'npm' && format('{0}/package-lock.json', inputs.working-directory) || '' }}
+      - name: install just (and bun)
+        env:
+          PM: ${{ inputs.package-manager }}
+        run: |
+          "$HARNESS/scripts/install-tool.sh" just
+          if [ "$PM" = bun ]; then "$HARNESS/scripts/install-tool.sh" bun; fi
+      - name: install dependencies (lockfile only)
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PM: ${{ inputs.package-manager }}
+        run: '"$HARNESS/scripts/node-setup.sh" install "$PM"'
+      - name: just ${{ inputs.lint-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.lint-recipe }}
+        run: just "$RECIPE"
+
+  unit:
+    if: ${{ !contains(inputs.skip, 'unit') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager == 'npm' && 'npm' || '' }}
+          cache-dependency-path: ${{ inputs.package-manager == 'npm' && format('{0}/package-lock.json', inputs.working-directory) || '' }}
+      - name: install just (and bun)
+        env:
+          PM: ${{ inputs.package-manager }}
+        run: |
+          "$HARNESS/scripts/install-tool.sh" just
+          if [ "$PM" = bun ]; then "$HARNESS/scripts/install-tool.sh" bun; fi
+      - name: install dependencies (lockfile only)
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PM: ${{ inputs.package-manager }}
+        run: '"$HARNESS/scripts/node-setup.sh" install "$PM"'
+      - name: just ${{ inputs.test-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.test-recipe }}
+        run: just "$RECIPE"
+
+  build:
+    if: ${{ !contains(inputs.skip, 'build') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager == 'npm' && 'npm' || '' }}
+          cache-dependency-path: ${{ inputs.package-manager == 'npm' && format('{0}/package-lock.json', inputs.working-directory) || '' }}
+      - name: install just (and bun)
+        env:
+          PM: ${{ inputs.package-manager }}
+        run: |
+          "$HARNESS/scripts/install-tool.sh" just
+          if [ "$PM" = bun ]; then "$HARNESS/scripts/install-tool.sh" bun; fi
+      - name: install dependencies (lockfile only)
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PM: ${{ inputs.package-manager }}
+        run: '"$HARNESS/scripts/node-setup.sh" install "$PM"'
+      - name: just ${{ inputs.build-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.build-recipe }}
+        run: just "$RECIPE"

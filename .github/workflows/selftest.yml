@@ -1,10 +1,12 @@
 # Self-test of the harness. Runs the reusable workflows at this commit against
 # the fixtures in tests/fixtures:
 #   positive controls  go-pass passes the gate and the scan with every fail-on
-#                      category set; this repository's own workflows lint clean
+#                      category set; node-pass-npm / node-pass-bun pass the node
+#                      gate; this repository's own workflows lint clean
 #   negative controls  planted findings (fake key, reachable vulnerable call,
 #                      secret logged to the console, root container, unpinned
-#                      action, failing test) are each reported
+#                      action, failing Go and Node tests, a second or missing
+#                      lockfile) are each reported
 # Negative controls run report-only and are asserted from the outputs, so the
 # self-test is green exactly when every planted finding is detected.
 # `v1` is advanced only to a commit whose self-test is green.
@@ -103,6 +105,54 @@ jobs:
           fi
           echo "just test failed as expected"
 
+  node-gate-npm:
+    uses: ./.github/workflows/node-gate.yml
+    with:
+      package-manager: npm
+      working-directory: tests/fixtures/node-pass-npm
+      harness-ref: ${{ github.sha }}
+
+  node-gate-bun:
+    uses: ./.github/workflows/node-gate.yml
+    with:
+      package-manager: bun
+      working-directory: tests/fixtures/node-pass-bun
+      harness-ref: ${{ github.sha }}
+
+  node-gate-fail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.1"
+      - run: scripts/install-tool.sh just
+      - name: the planted failing test must fail `just test`
+        working-directory: tests/fixtures/node-fail
+        run: |
+          ../../../scripts/node-setup.sh install npm
+          if just test; then
+            echo "::error::just test passed although a test fails"
+            exit 1
+          fi
+          echo "just test failed as expected"
+      - name: a second lockfile and a missing lockfile must fail the check
+        run: |
+          work=$(mktemp -d)
+          cp tests/fixtures/node-fail/package.json tests/fixtures/node-fail/package-lock.json tests/fixtures/node-pass-bun/bun.lock "$work/"
+          if (cd "$work" && "$GITHUB_WORKSPACE/scripts/node-setup.sh" check-lockfile npm); then
+            echo "::error::bun.lock next to package-lock.json was accepted"
+            exit 1
+          fi
+          if (cd tests/fixtures/node-pass-npm && "$GITHUB_WORKSPACE/scripts/node-setup.sh" check-lockfile bun); then
+            echo "::error::a missing bun.lock was accepted"
+            exit 1
+          fi
+          echo "lockfile checks failed as expected"
+
   security-clean:
     uses: ./.github/workflows/security.yml
     permissions:
@@ -183,7 +233,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, security-clean, security-planted, release-dry-run, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-bun, node-gate-fail, security-clean, security-planted, release-dry-run, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

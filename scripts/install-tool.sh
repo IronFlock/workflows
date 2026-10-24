@@ -26,6 +26,7 @@ for name in "$@"; do
   case "$file" in
     *.tar.gz | *.tgz) tar -xzf "$file" -C "$dir" ;;
     *.tar.xz) tar -xJf "$file" -C "$dir" ;;
+    *.zip) unzip -q "$file" -d "$dir" ;;
   esac
   if [ "$member" = "-" ]; then
     src=$file

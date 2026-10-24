@@ -1,0 +1,10 @@
+# Recipe contract of a Node repository (bun), in its smallest form.
+
+lint:
+    node --check sum.js
+
+test:
+    bun test
+
+build:
+    node -e 'import("./sum.js").then((m) => process.exit(m.sum(1, 1) === 2 ? 0 : 1))'
