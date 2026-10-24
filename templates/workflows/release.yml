@@ -48,6 +48,6 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release ')
     uses: IronFlock/workflows/.github/workflows/release-tag.yml@v1
     permissions:
-      contents: write
+      contents: read
     with:
       version-file: VERSION

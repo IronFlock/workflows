@@ -47,7 +47,7 @@ The inputs of each workflow are documented in its `on.workflow_call` block.
 | [workflows-lint.yml](.github/workflows/workflows-lint.yml) | `lint` | actionlint, zizmor, pinact on the caller's workflows; always blocking |
 | [release-intent.yml](.github/workflows/release-intent.yml) | `intent` | the version file decides: a rise makes a release PR (title `release <name> <tag>` required), an unchanged version a no-release PR; output `kind` gates the release dry run; listed in the `needs` of `ci-ok` |
 | [release-image.yml](.github/workflows/release-image.yml) | `verify`, `build`, `publish` | release of a container image on the merge of a release PR into the protected `main`; native multi-arch build, SBOM + provenance attached, keyless push; on a release PR a dry run (every platform build, no push); re-runs are safe; read rights only |
-| [release-tag.yml](.github/workflows/release-tag.yml) | `tag` | the annotated git tag of a release, after every image job of the caller; a tag always means "in the registry"; needs `contents: write` |
+| [release-tag.yml](.github/workflows/release-tag.yml) | `tag` | the annotated git tag of a release, after every image job of the caller; a tag always means "in the registry"; written with a token of the release GitHub App from the caller's `release` environment |
 | [selftest.yml](.github/workflows/selftest.yml) | — | proves the harness against [tests/fixtures](tests/fixtures) |
 
 Gates for Node, Python and chart/shell repositories follow the same pattern
@@ -132,9 +132,13 @@ the next release PR; the unreleased version stays a gap in the history.
 only when the squash-merge title is a release title (`release <name> v...`;
 [templates/workflows/release.yml](templates/workflows/release.yml)). The
 identity provider grants the publisher service account only to main-branch
-pushes (and version tags) through `release-image.yml`. The caller's `tag` job
-(`release-tag.yml`) needs `contents: write`, and the GitHub Actions app as a
-bypass actor of the repository's `release tags v*` tag ruleset.
+pushes (and version tags) through `release-image.yml`. Only the IronFlock
+release GitHub App may create `v*` tags (bypass actor of the repository's
+`release tags v*` tag ruleset; the built-in GitHub Actions app cannot be one).
+`release-tag.yml` takes its token in the repository's `release` environment:
+deployments from `main` only, variable `RELEASE_APP_CLIENT_ID`, secret
+`RELEASE_APP_PRIVATE_KEY`; the token covers the contents of that one
+repository. Callers grant `contents: read` only.
 
 ## Exceptions
 
