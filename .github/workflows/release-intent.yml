@@ -1,9 +1,9 @@
-# Reusable check: every pull request into main is either
-#   a release PR     the version rises and the title is `release <name> <tag>`
+# Reusable check: the version file decides what a pull request into main is
+#   a release PR     the version rises; the title must be `release <name> <tag>`
 #                    (`just release-patch`); its merge starts the release
-#   a no-release PR  the title starts with `no-release:` (`just pr`) and the
-#                    version is unchanged; its merge releases nothing
-# Anything else fails. Callers list this job in the `needs` of their `ci-ok`,
+#   a no-release PR  the version is unchanged (`just merge`); any title that
+#                    does not read like a release; its merge releases nothing
+# Anything else fails (a lower version, a release title without a bump). Callers list this job in the `needs` of their `ci-ok`,
 # so the main-branch ruleset enforces it. Outside a pull request it passes.
 #
 # The title is read from the event, so a title edited after the checks ran is

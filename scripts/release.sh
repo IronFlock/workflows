@@ -9,9 +9,11 @@
 #
 #   release.sh intent
 #       the release intent of a pull request into main. Env: VERSION_FILE,
-#       TAG_PREFIX, BASE_SHA, HEAD_SHA, TITLE. Every pull request is one of
+#       TAG_PREFIX, BASE_SHA, HEAD_SHA, TITLE. The version file decides:
 #         release      the version rises; the title is `release <name> <tag>`
-#         no-release   the title starts with `no-release:`; the version is unchanged
+#                      (just release-patch|minor|major)
+#         no-release   the version is unchanged (just merge); any title except
+#                      one that reads like a release
 #       anything else fails. Writes kind= (and tag= for a release) to GITHUB_OUTPUT.
 #
 #   release.sh mode
@@ -61,20 +63,16 @@ intent() {
   head=$(version "$VERSION_FILE" "$HEAD_SHA")
   [ -n "$head" ] || { echo "::error::$VERSION_FILE has no version at $HEAD_SHA"; return 1; }
 
-  if [[ "$TITLE" == no-release:* ]]; then
-    if [ "$head" != "$base" ]; then
-      echo "::error::a no-release pull request must not change the version ($VERSION_FILE: $base -> $head)"
+  if [ "$head" = "$base" ]; then
+    if [[ "$TITLE" =~ ^release\ [^\ ]+\ ${TAG_PREFIX}[0-9] ]]; then
+      echo "::error::the title reads like a release, but $VERSION_FILE is unchanged ($head): bump it (just release-patch) or retitle the pull request"
       return 1
     fi
-    echo "no-release pull request: merging it releases nothing"
+    echo "no-release pull request (version unchanged): merging it releases nothing"
     out kind=no-release
     return 0
   fi
 
-  if [ "$head" = "$base" ]; then
-    echo "::error::the version is unchanged ($head): bump it for a release (just release-patch) or start the title with 'no-release:' (just pr)"
-    return 1
-  fi
   if ! higher "$head" "$base"; then
     echo "::error::the version must rise: $VERSION_FILE goes from $base to $head"
     return 1

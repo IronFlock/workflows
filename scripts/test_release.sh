@@ -66,8 +66,8 @@ for vf in VERSION package.json; do
   base=$(git -C "$r" rev-parse HEAD)
 
   same=$(commit "$r" "docs")
-  check "$vf: no-release, version unchanged" 0 intent "$r" "$vf" "$base" "$same" "no-release: fix a typo"
-  check "$vf: unchanged version without the marker" 1 intent "$r" "$vf" "$base" "$same" "fix a typo"
+  check "$vf: no-release, version unchanged" 0 intent "$r" "$vf" "$base" "$same" "fix a typo"
+  check "$vf: no-release, any title" 0 intent "$r" "$vf" "$base" "$same" "deps: bump express (dependabot)"
   check "$vf: release title without a bump" 1 intent "$r" "$vf" "$base" "$same" "release x v1.2.3"
 
   git -C "$r" checkout -q "$base"
@@ -78,7 +78,6 @@ for vf in VERSION package.json; do
   check "$vf: release PR" 0 intent "$r" "$vf" "$base" "$bump" "release x v1.2.4"
   expect_output "$vf: release PR reports its tag" "tag=v1.2.4"
   unset GITHUB_OUTPUT
-  check "$vf: bump marked no-release" 1 intent "$r" "$vf" "$base" "$bump" "no-release: sneaky"
   check "$vf: bump without a release title" 1 intent "$r" "$vf" "$base" "$bump" "fix a typo"
   check "$vf: release title names another version" 1 intent "$r" "$vf" "$base" "$bump" "release x v1.2.5"
   check "$vf: release title with text after the tag" 1 intent "$r" "$vf" "$base" "$bump" "release x v1.2.4 and more"
@@ -108,7 +107,7 @@ check "merge of a release PR releases" 0 mode "$r" push refs/heads/main branch m
 expect_output "merge of a release PR: mode release" "mode=release"
 expect_output "merge of a release PR: tag" "tag=v2.0.0"
 check "merge title with the PR body below" 0 mode "$r" push refs/heads/main branch main $'release x v2.0.0 (#12)\n\nbody'
-check "merge of a no-release PR is refused" 1 mode "$r" push refs/heads/main branch main "no-release: docs (#13)"
+check "merge of a no-release PR is refused" 1 mode "$r" push refs/heads/main branch main "docs: typo (#13)"
 check "merge naming another version is refused" 1 mode "$r" push refs/heads/main branch main "release x v1.9.0 (#14)"
 git -C "$r" tag -a v2.0.0 -m "release x v2.0.0"
 : > "$GITHUB_OUTPUT"

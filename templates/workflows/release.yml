@@ -1,18 +1,24 @@
 # Caller template for the release of a container image.
-# Copy to .github/workflows/release.yml and adjust `paths` and the `with:` block.
+# Copy to .github/workflows/release.yml and adjust `paths` and the `with:` blocks.
 #
 # The merge of a release pull request (`just release-patch`: version bump,
-# title `release <name> v<version>`) publishes the image and sets the tag.
-# A no-release merge starts nothing: `paths` holds only the version file, and
-# when a no-release PR touches it anyway (a dependency in package.json) the
-# job below is skipped by its merge title and no runner starts.
-# Run by hand (workflow_dispatch) it is a dry run: both platform builds, no push.
+# title `release <name> v<version>`) publishes the image and then sets the tag
+# `v<version>` on the merged commit, so a tag always means "in the registry".
+# A no-release merge (`just merge`) starts nothing: `paths` holds only the
+# version file, and when a no-release PR touches it anyway (a dependency in a
+# package.json) the jobs below are skipped by the merge title, so no runner
+# starts. Run by hand (workflow_dispatch) it is a dry run: every platform
+# build, no push, no tag.
+#
+# ci.yml calls this workflow on release pull requests (workflow_call) as the
+# release dry run, so a broken image build never reaches main.
 name: release
 
 on:
   push:
     branches: [main]
     paths: [VERSION]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -24,13 +30,24 @@ concurrency:
 
 jobs:
   image:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release ')
+    if: github.event_name != 'push' || startsWith(github.event.head_commit.message, 'release ')
     uses: IronFlock/workflows/.github/workflows/release-image.yml@v1
     permissions:
-      contents: write
+      contents: read
       id-token: write
     with:
       image: europe-docker.pkg.dev/<project>/<repository>/<name>
       version-file: VERSION
       workload-identity-provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       service-account: <publisher>@<project>.iam.gserviceaccount.com
+
+  # The tag once every image is in the registry (a second image: add its job
+  # to `needs`). Only on the merge of a release pull request.
+  tag:
+    needs: [image]
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release ')
+    uses: IronFlock/workflows/.github/workflows/release-tag.yml@v1
+    permissions:
+      contents: write
+    with:
+      version-file: VERSION

@@ -1,8 +1,9 @@
-# Reusable: the git tag of a release that publishes several images in one run.
-# Each image job calls release-image.yml with create-tag: false; this job runs
-# after all of them and sets the annotated tag <tag-prefix><version> on the
-# merged commit, as release-image.yml does for a single image. Outside the
-# merge of a release pull request it does nothing.
+# Reusable: the git tag of a release. The caller's tag job `needs` every image
+# job (release-image.yml, one per image) and sets the annotated tag
+# <tag-prefix><version> on the merged commit once all images are in the
+# registry, so a tag always means "released". Outside the merge of a release
+# pull request it does nothing; on a re-run whose tag is already on this
+# commit it passes.
 #
 # Callers grant
 #   permissions: { contents: write }

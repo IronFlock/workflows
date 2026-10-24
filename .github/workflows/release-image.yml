@@ -10,15 +10,18 @@
 #            BuildKit SBOM + SLSA provenance attestations attached
 #   publish  one multi-arch index tagged <tag> and `latest`; SBOM artifact,
 #            digest in the job summary
-#   tag      the annotated git tag <tag> on the merged commit
+#
+# The git tag is set afterwards by release-tag.yml (a job of its own in the
+# caller, `needs` this one), so this workflow never needs write access to the
+# repository: release pull requests call it as a dry run with read rights.
 #
 # Checks are not repeated here: the release branch is protected by a ruleset
 # that only accepts pull requests whose required checks (ci-ok, security /
 # report) passed, so every commit on it is green.
 #
 # Re-runs are safe: when the image already exists from this very commit (its
-# revision label), the build is skipped and only the tag is set; when the tag
-# is already on this commit, nothing is left to do.
+# revision label), the build is skipped (release-tag.yml then sets the tag);
+# when the tag is already on this commit, nothing is left to do.
 #
 # Push credentials come from GCP Workload Identity Federation: no key is
 # stored anywhere. The identity provider grants the publisher service account
@@ -33,9 +36,7 @@
 # it verifies and builds every platform, and pushes nothing.
 #
 # Callers grant
-#   permissions: { contents: write, id-token: write }
-# (contents: write only for the tag job; contents: read suffices with
-# create-tag: false).
+#   permissions: { contents: read, id-token: write }
 name: release-image
 
 on:
@@ -77,13 +78,6 @@ on:
         description: Also move the `latest` tag to this release.
         type: boolean
         default: true
-      create-tag:
-        description: >-
-          Set the git tag after the release. A repository that releases two
-          images in one run sets false on both and tags once with
-          release-tag.yml after both.
-        type: boolean
-        default: true
       artifact-prefix:
         description: Prefix of this call's artifact names; required when one run calls this workflow twice.
         type: string
@@ -107,10 +101,8 @@ on:
       tag:
         value: ${{ jobs.verify.outputs.tag }}
 
-# No workflow-level permissions: every job but `tag` names its own. `tag`
-# takes the caller's grant, so a caller that grants only contents: read (the
-# tag-triggered flow, the self-test's dry runs) still starts; it runs only on
-# the merge of a release pull request, whose caller grants contents: write.
+# No workflow-level permissions: every job names its own (contents: read,
+# id-token: write), so a release pull request's dry run starts with read rights.
 
 defaults:
   run:
@@ -365,31 +357,3 @@ jobs:
           path: ${{ runner.temp }}/sbom
           if-no-files-found: error
           retention-days: 90
-
-  tag:
-    needs: [verify, publish]
-    # After a publish, or on a re-run whose image was already complete.
-    if: >-
-      always() && inputs.create-tag && needs.verify.result == 'success' &&
-      needs.verify.outputs.mode == 'release' &&
-      (needs.publish.result == 'success' || needs.verify.outputs.build == 'false')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: IronFlock/workflows
-          ref: ${{ inputs.harness-ref }}
-          persist-credentials: false
-          sparse-checkout: scripts
-          sparse-checkout-cone-mode: false
-      - name: git tag ${{ needs.verify.outputs.tag }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ needs.verify.outputs.tag }}
-          SHA: ${{ github.sha }}
-          MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          MESSAGE=$(head -n1 <<<"$MESSAGE")
-          MESSAGE=${MESSAGE% (#*)} scripts/release.sh tag
