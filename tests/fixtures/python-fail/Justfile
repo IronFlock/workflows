@@ -1,0 +1,11 @@
+# Recipe contract of a Python repository (uv), in its smallest form.
+
+lint:
+    uvx ruff@0.14.0 check .
+    uvx ruff@0.14.0 format --check .
+
+test:
+    uv run python -m unittest -v
+
+build:
+    uv build --out-dir "$(mktemp -d)"

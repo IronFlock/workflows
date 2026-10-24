@@ -2,10 +2,11 @@
 # the fixtures in tests/fixtures:
 #   positive controls  go-pass passes the gate and the scan with every fail-on
 #                      category set; node-pass-npm / node-pass-bun pass the node
-#                      gate; this repository's own workflows lint clean
+#                      gate; python-pass passes the python gate; this
+#                      repository's own workflows lint clean
 #   negative controls  planted findings (fake key, reachable vulnerable call,
 #                      secret logged to the console, root container, unpinned
-#                      action, failing Go and Node tests, a second or missing
+#                      action, failing Go, Node and Python tests, a second or missing
 #                      lockfile) are each reported
 # Negative controls run report-only and are asserted from the outputs, so the
 # self-test is green exactly when every planted finding is detected.
@@ -163,6 +164,33 @@ jobs:
           fi
           echo "lockfile checks failed as expected"
 
+  python-gate-pass:
+    uses: ./.github/workflows/python-gate.yml
+    with:
+      working-directory: tests/fixtures/python-pass
+      harness-ref: ${{ github.sha }}
+
+  python-gate-fail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: scripts/install-tool.sh just uv uvx
+      - name: the planted failing test must fail `just test`
+        working-directory: tests/fixtures/python-fail
+        run: |
+          uv sync --frozen
+          if just test; then
+            echo "::error::just test passed although a test fails"
+            exit 1
+          fi
+          echo "just test failed as expected"
+
   security-clean:
     uses: ./.github/workflows/security.yml
     permissions:
@@ -274,7 +302,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, security-clean, security-clean-node, security-planted, release-dry-run, release-dry-run-package-json, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, security-clean, security-clean-node, security-planted, release-dry-run, release-dry-run-package-json, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

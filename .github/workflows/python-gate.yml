@@ -1,0 +1,188 @@
+# Reusable gate for Python repositories: lint, unit tests, build.
+#
+# Every logic step is a `just` recipe of the calling repository, so the gate
+# runs the same locally and in CI. `just` runs from `working-directory` and
+# finds the repository's Justfile upwards from there.
+#
+# Recipe contract (see README):
+#   lint   non-mutating static checks (ruff check, ruff format --check, mypy
+#          where configured)
+#   test   hermetic unit tests
+#   build  the repository's artefact build, without publishing
+#
+# uv comes from tools.lock. With a uv.lock in working-directory the
+# environment is `uv sync --frozen` (exactly the lockfile); without one the
+# recipes bring their own tools (uvx with pinned versions).
+#
+# Job names stay `lint` / `unit` / `build`, as in the other gates.
+name: python-gate
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory holding pyproject.toml (and uv.lock); `just` runs from here.
+        type: string
+        default: "."
+      python-version:
+        description: Python version for actions/setup-python.
+        type: string
+        default: "3.13"
+      skip:
+        description: Comma list of jobs to skip (lint, unit, build).
+        type: string
+        default: ""
+      tools:
+        description: Extra tools from tools.lock to install (space-separated).
+        type: string
+        default: ""
+      lint-recipe:
+        type: string
+        default: lint
+      test-recipe:
+        type: string
+        default: test
+      build-recipe:
+        type: string
+        default: build
+      harness-ref:
+        description: Ref of IronFlock/workflows the harness scripts are taken from.
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    if: ${{ !contains(inputs.skip, 'lint') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: install just, uv and uvx (and extra tools)
+        env:
+          TOOLS: ${{ inputs.tools }}
+        run: |
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          "$HARNESS/scripts/install-tool.sh" just uv uvx $TOOLS
+      - name: install dependencies (uv.lock only)
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          if [ -f uv.lock ]; then uv sync --frozen --all-groups; else echo "no uv.lock: the recipes bring their own tools"; fi
+      - name: just ${{ inputs.lint-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.lint-recipe }}
+        run: just "$RECIPE"
+
+  unit:
+    if: ${{ !contains(inputs.skip, 'unit') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: install just, uv and uvx (and extra tools)
+        env:
+          TOOLS: ${{ inputs.tools }}
+        run: |
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          "$HARNESS/scripts/install-tool.sh" just uv uvx $TOOLS
+      - name: install dependencies (uv.lock only)
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          if [ -f uv.lock ]; then uv sync --frozen --all-groups; else echo "no uv.lock: the recipes bring their own tools"; fi
+      - name: just ${{ inputs.test-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.test-recipe }}
+        run: just "$RECIPE"
+
+  build:
+    if: ${{ !contains(inputs.skip, 'build') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: install just, uv and uvx (and extra tools)
+        env:
+          TOOLS: ${{ inputs.tools }}
+        run: |
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          "$HARNESS/scripts/install-tool.sh" just uv uvx $TOOLS
+      - name: install dependencies (uv.lock only)
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          UV_PYTHON_DOWNLOADS: never
+        run: |
+          if [ -f uv.lock ]; then uv sync --frozen --all-groups; else echo "no uv.lock: the recipes bring their own tools"; fi
+      - name: just ${{ inputs.build-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.build-recipe }}
+        run: just "$RECIPE"
