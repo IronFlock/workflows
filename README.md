@@ -140,6 +140,10 @@ deployments from `main` only, variable `RELEASE_APP_CLIENT_ID`, secret
 `RELEASE_APP_PRIVATE_KEY`; the token covers the contents of that one
 repository. Callers grant `contents: read` only and pass `secrets: inherit`:
 environment secrets reach a reusable workflow only that way.
+With `promote-branch` set, the tag job then fast-forwards that branch to the
+released commit (never a force push), for a hosting service that deploys from
+a branch: only release merges reach it. Protect that branch with a ruleset
+whose only bypass actor is the release App.
 
 ## Pull requests from a laptop
 

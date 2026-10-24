@@ -28,6 +28,13 @@ on:
       release-branch:
         type: string
         default: main
+      promote-branch:
+        description: >-
+          Branch to fast-forward to the released commit after the tag (e.g. the
+          branch a hosting service deploys from); empty = none. Created if
+          missing; never force-pushed.
+        type: string
+        default: ""
       harness-ref:
         description: Ref of IronFlock/workflows the harness scripts are taken from.
         type: string
@@ -102,3 +109,11 @@ jobs:
         run: |
           MESSAGE=$(head -n1 <<<"$MESSAGE")
           MESSAGE=${MESSAGE% (#*)} "$HARNESS/scripts/release.sh" tag
+      - name: fast-forward ${{ inputs.promote-branch }}
+        if: steps.version.outputs.mode == 'release' && inputs.promote-branch != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ inputs.promote-branch }}
+          SHA: ${{ github.sha }}
+        run: '"$HARNESS/scripts/release.sh" promote'
