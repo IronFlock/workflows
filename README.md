@@ -138,7 +138,8 @@ release GitHub App may create `v*` tags (bypass actor of the repository's
 `release-tag.yml` takes its token in the repository's `release` environment:
 deployments from `main` only, variable `RELEASE_APP_CLIENT_ID`, secret
 `RELEASE_APP_PRIVATE_KEY`; the token covers the contents of that one
-repository. Callers grant `contents: read` only.
+repository. Callers grant `contents: read` only and pass `secrets: inherit`:
+environment secrets reach a reusable workflow only that way.
 
 ## Exceptions
 
