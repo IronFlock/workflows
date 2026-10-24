@@ -64,9 +64,11 @@ intent() {
   [ -n "$head" ] || { echo "::error::$VERSION_FILE has no version at $HEAD_SHA"; return 1; }
 
   if [ "$head" = "$base" ]; then
+    # The squash merge carries this title, and release.yml starts on a merge
+    # whose message starts with 'release ' (GitHub compares case-insensitively).
     # shellcheck disable=SC2153 # TITLE comes from the environment (see the header)
-    if [[ "$TITLE" =~ ^release\ [^\ ]+\ ${TAG_PREFIX}[0-9] ]]; then
-      echo "::error::the title reads like a release, but $VERSION_FILE is unchanged ($head): bump it (just release-patch) or retitle the pull request"
+    if [[ "$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]')" == "release "* ]]; then
+      echo "::error::the title starts with 'release ', but $VERSION_FILE is unchanged ($head): bump it (just release-patch) or retitle the pull request"
       return 1
     fi
     echo "no-release pull request (version unchanged): merging it releases nothing"

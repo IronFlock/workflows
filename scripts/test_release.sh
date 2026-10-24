@@ -69,6 +69,8 @@ for vf in VERSION package.json; do
   check "$vf: no-release, version unchanged" 0 intent "$r" "$vf" "$base" "$same" "fix a typo"
   check "$vf: no-release, any title" 0 intent "$r" "$vf" "$base" "$same" "deps: bump express (dependabot)"
   check "$vf: release title without a bump" 1 intent "$r" "$vf" "$base" "$same" "release x v1.2.3"
+  check "$vf: any title starting with release, without a bump" 1 intent "$r" "$vf" "$base" "$same" "Release notes cleanup"
+  check "$vf: no-release title mentioning a release later" 0 intent "$r" "$vf" "$base" "$same" "docs: explain the release flow"
 
   git -C "$r" checkout -q "$base"
   setv "$r" "$vf" 1.2.4
