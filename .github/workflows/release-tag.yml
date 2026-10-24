@@ -12,6 +12,7 @@
 #
 # Callers grant
 #   permissions: { contents: read }
+#   secrets: inherit   (environment secrets reach a reusable workflow only so)
 name: release-tag
 
 on:
