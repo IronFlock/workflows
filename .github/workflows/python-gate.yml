@@ -83,12 +83,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ inputs.python-version }}
-      - name: install just and uv (and extra tools)
+      - name: install just, uv and uvx (and extra tools)
         env:
           TOOLS: ${{ inputs.tools }}
         run: |
           # shellcheck disable=SC2086 # a space-separated list of tool names
-          "$HARNESS/scripts/install-tool.sh" just uv $TOOLS
+          "$HARNESS/scripts/install-tool.sh" just uv uvx $TOOLS
       - name: install dependencies (uv.lock only)
         working-directory: ${{ inputs.working-directory }}
         env:
@@ -126,12 +126,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ inputs.python-version }}
-      - name: install just and uv (and extra tools)
+      - name: install just, uv and uvx (and extra tools)
         env:
           TOOLS: ${{ inputs.tools }}
         run: |
           # shellcheck disable=SC2086 # a space-separated list of tool names
-          "$HARNESS/scripts/install-tool.sh" just uv $TOOLS
+          "$HARNESS/scripts/install-tool.sh" just uv uvx $TOOLS
       - name: install dependencies (uv.lock only)
         working-directory: ${{ inputs.working-directory }}
         env:
@@ -169,12 +169,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ inputs.python-version }}
-      - name: install just and uv (and extra tools)
+      - name: install just, uv and uvx (and extra tools)
         env:
           TOOLS: ${{ inputs.tools }}
         run: |
           # shellcheck disable=SC2086 # a space-separated list of tool names
-          "$HARNESS/scripts/install-tool.sh" just uv $TOOLS
+          "$HARNESS/scripts/install-tool.sh" just uv uvx $TOOLS
       - name: install dependencies (uv.lock only)
         working-directory: ${{ inputs.working-directory }}
         env:

@@ -19,3 +19,4 @@ just        1.59.0  409044617b6f06517c1035e55ca38c8c856ff8b650e41bc2aa1ef82d5903
 kubeconform 0.8.0   9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz  kubeconform
 bun         1.3.13  79c0771fa8b92c33aae41e15a0e0d307ea99d0e2f00317c71c6c53237a78e25a  https://github.com/oven-sh/bun/releases/download/bun-v1.3.13/bun-linux-x64.zip  bun-linux-x64/bun
 uv          0.13.0  1468ebd5a5541121837c5a2817b9972ba6090fa6caa3d142620850a47fb75154  https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-unknown-linux-gnu.tar.gz  uv-x86_64-unknown-linux-gnu/uv
+uvx         0.13.0  1468ebd5a5541121837c5a2817b9972ba6090fa6caa3d142620850a47fb75154  https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-unknown-linux-gnu.tar.gz  uv-x86_64-unknown-linux-gnu/uvx
