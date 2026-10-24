@@ -5,8 +5,13 @@
 # pull request it does nothing; on a re-run whose tag is already on this
 # commit it passes.
 #
+# The tag ruleset admits only the IronFlock release GitHub App, so the tag is
+# written with an App token. The job runs in the caller's `release`
+# environment (deployments from main only), which holds the variable
+# RELEASE_APP_CLIENT_ID and the secret RELEASE_APP_PRIVATE_KEY.
+#
 # Callers grant
-#   permissions: { contents: write }
+#   permissions: { contents: read }
 name: release-tag
 
 on:
@@ -41,8 +46,9 @@ jobs:
   tag:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    environment: release
     permissions:
-      contents: write
+      contents: read
     outputs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
@@ -75,10 +81,19 @@ jobs:
           COMMIT_TITLE: ${{ github.event.head_commit.message }}
           SHA: ${{ github.sha }}
         run: '"$HARNESS/scripts/release.sh" mode'
+      - name: release App token (contents of this repository)
+        id: app
+        if: steps.version.outputs.mode == 'release'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
       - name: git tag ${{ steps.version.outputs.tag }}
         if: steps.version.outputs.mode == 'release'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
           SHA: ${{ github.sha }}

@@ -36,15 +36,13 @@ jobs:
 
   # Release pull requests only: the release workflow as a dry run (every
   # platform build, no push, no tag), so a broken image build never reaches
-  # main. contents: write only because GitHub checks the called workflow's
-  # tag job against this grant even though the job is skipped here (it runs
-  # on a push to main only); fork pull requests get a read-only token anyway.
+  # main.
   release-build:
     needs: [intent]
     if: needs.intent.outputs.kind == 'release'
     uses: ./.github/workflows/release.yml
     permissions:
-      contents: write
+      contents: read
       id-token: write
 
   # The one required check of the main-branch ruleset: green only when every
