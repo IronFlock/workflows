@@ -15,7 +15,6 @@ name: selftest
 
 on:
   pull_request:
-  push:
     branches: [main]
   schedule:
     # Weekly: scanner databases and rule sets change without a commit here.
@@ -64,6 +63,8 @@ jobs:
         run: shellcheck scripts/*.sh
       - name: sarif-summary unit tests
         run: python3 -I scripts/test_sarif_summary.py
+      - name: release.sh unit tests
+        run: bash scripts/test_release.sh
       # Public repository: no internal document names or plan IDs.
       - name: public-repo hygiene
         run: |
@@ -243,8 +244,10 @@ jobs:
       code-scanning: false
       harness-ref: ${{ github.sha }}
 
-  # Dry run of the release workflow (not on a tag: builds both platforms
-  # natively, pushes nothing, needs no credentials).
+  # Dry run of the release workflow (not the merge of a release pull request:
+  # builds both platforms natively, pushes nothing, needs no credentials).
+  # The decisions of a real release (merge title, existing tag, re-run) are
+  # covered by the release.sh unit tests in `scripts`.
   release-dry-run:
     uses: ./.github/workflows/release-image.yml
     permissions:
@@ -257,6 +260,8 @@ jobs:
       context: tests/fixtures/release
       workload-identity-provider: dry-run-unused
       service-account: dry-run-unused
+      artifact-prefix: version-file-
+      harness-ref: ${{ github.sha }}
 
   # The version of a Node repository lives in package.json.
   release-dry-run-package-json:
@@ -271,6 +276,8 @@ jobs:
       context: tests/fixtures/release
       workload-identity-provider: dry-run-unused
       service-account: dry-run-unused
+      artifact-prefix: package-json-
+      harness-ref: ${{ github.sha }}
 
   assert-planted:
     needs: [security-planted, lint-planted]

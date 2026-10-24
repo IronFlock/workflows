@@ -1,29 +1,41 @@
-# Reusable release of a container image, triggered by a version tag.
+# Reusable release of a container image, run by the merge of a release pull
+# request into main (a push to main whose squash-merge title is
+# `release <name> <tag>`, see release-intent.yml).
 #
-#   verify   the tag equals <tag-prefix><version file>; the tagged commit is
-#            part of the release branch (main); the tag does not exist in the
-#            registry yet (released images are never overwritten)
-#
-# Checks are not repeated here: the release branch is protected by a ruleset
-# that only accepts pull requests whose required checks (ci-ok, security /
-# report) passed, so every commit on it is green.
+#   verify   the version file names <tag-prefix><version> = the tag in the
+#            merge title; the commit is part of the release branch (main); the
+#            tag does not exist yet; the image is not in the registry yet
+#            (released images are never overwritten)
 #   build    one native build per platform (no QEMU), pushed by digest, with
 #            BuildKit SBOM + SLSA provenance attestations attached
 #   publish  one multi-arch index tagged <tag> and `latest`; SBOM artifact,
 #            digest in the job summary
+#   tag      the annotated git tag <tag> on the merged commit
+#
+# Checks are not repeated here: the release branch is protected by a ruleset
+# that only accepts pull requests whose required checks (ci-ok, security /
+# report) passed, so every commit on it is green.
+#
+# Re-runs are safe: when the image already exists from this very commit (its
+# revision label), the build is skipped and only the tag is set; when the tag
+# is already on this commit, nothing is left to do.
 #
 # Push credentials come from GCP Workload Identity Federation: no key is
 # stored anywhere. The identity provider grants the publisher service account
-# only to tag runs of an allowed repository through this workflow, so pull
-# requests, branches and other workflows cannot push — and because the checks
-# above live in this file, no caller can release without them.
+# only to main-branch pushes (and version tags) of an allowed repository
+# through this workflow, so pull requests, other branches and other workflows
+# cannot push — and because the checks above live in this file, no caller can
+# release without them.
 #
-# Run anywhere except on a matching tag (e.g. workflow_dispatch on a branch),
-# the workflow is a dry run: it verifies and builds every platform, and pushes
-# nothing.
+# A pushed version tag still releases (the flow before releases on merge; the
+# tag must equal the version file, and no git tag is set). Anywhere else
+# (pull requests, other branches, workflow_dispatch) the workflow is a dry run:
+# it verifies and builds every platform, and pushes nothing.
 #
 # Callers grant
-#   permissions: { contents: read, id-token: write }
+#   permissions: { contents: write, id-token: write }
+# (contents: write only for the tag job; contents: read suffices with
+# create-tag: false).
 name: release-image
 
 on:
@@ -65,6 +77,21 @@ on:
         description: Also move the `latest` tag to this release.
         type: boolean
         default: true
+      create-tag:
+        description: >-
+          Set the git tag after the release. A repository that releases two
+          images in one run sets false on both and tags once with
+          release-tag.yml after both.
+        type: boolean
+        default: true
+      artifact-prefix:
+        description: Prefix of this call's artifact names; required when one run calls this workflow twice.
+        type: string
+        default: ""
+      harness-ref:
+        description: Ref of IronFlock/workflows the harness scripts are taken from.
+        type: string
+        default: v1
       workload-identity-provider:
         description: Full resource name of the GCP workload identity provider.
         type: string
@@ -80,8 +107,10 @@ on:
       tag:
         value: ${{ jobs.verify.outputs.tag }}
 
-permissions:
-  contents: read
+# No workflow-level permissions: every job but `tag` names its own. `tag`
+# takes the caller's grant, so a caller that grants only contents: read (the
+# tag-triggered flow, the self-test's dry runs) still starts; it runs only on
+# the merge of a release pull request, whose caller grants contents: write.
 
 defaults:
   run:
@@ -96,41 +125,53 @@ jobs:
       id-token: write
     outputs:
       tag: ${{ steps.version.outputs.tag }}
+      mode: ${{ steps.version.outputs.mode }}
       push: ${{ steps.version.outputs.push }}
+      build: ${{ steps.registry.outputs.build || steps.version.outputs.build }}
       registry: ${{ steps.version.outputs.registry }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: tag = version file
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: what this run releases
         id: version
         env:
           VERSION_FILE: ${{ inputs.version-file }}
-          PREFIX: ${{ inputs.tag-prefix }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
           IMAGE: ${{ inputs.image }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          RELEASE_BRANCH: ${{ inputs.release-branch }}
+          COMMIT_TITLE: ${{ github.event.head_commit.message }}
+          SHA: ${{ github.sha }}
         run: |
-          case "$VERSION_FILE" in
-            package.json | */package.json) version=$(jq -r '.version // empty' "$VERSION_FILE") ;;
-            *) version=$(tr -d '[:space:]' < "$VERSION_FILE") ;;
+          "$HARNESS/scripts/release.sh" mode
+          mode=$(sed -n 's/^mode=//p' "$GITHUB_OUTPUT" | tail -n1)
+          case "$mode" in
+            tag | release) push=true; build=true ;;
+            released) push=false; build=false ;;
+            *) push=false; build=true ;;
           esac
-          [ -n "$version" ] || { echo "::error::$VERSION_FILE is empty"; exit 1; }
-          tag="${PREFIX}${version}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "registry=${IMAGE%%/*}" >> "$GITHUB_OUTPUT"
-          if [ "$REF_TYPE" = tag ]; then
-            if [ "$REF_NAME" != "$tag" ]; then
-              echo "::error::tag $REF_NAME does not match $VERSION_FILE ($tag)"
-              exit 1
-            fi
-            echo "push=true" >> "$GITHUB_OUTPUT"
-            echo "release $IMAGE:$tag"
-          else
-            echo "push=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::dry run on $REF_TYPE $REF_NAME: builds $IMAGE:$tag, pushes nothing"
-          fi
+          {
+            echo "push=$push"
+            echo "build=$build"
+            echo "registry=${IMAGE%%/*}"
+          } >> "$GITHUB_OUTPUT"
       - name: the commit is part of ${{ inputs.release-branch }}
         if: steps.version.outputs.push == 'true'
         env:
@@ -158,22 +199,37 @@ jobs:
           token_format: access_token
           access_token_lifetime: 300s
       - name: the tag is not in the registry yet
+        id: registry
         if: steps.version.outputs.push == 'true'
         env:
           TOKEN: ${{ steps.auth.outputs.access_token }}
           REGISTRY: ${{ steps.version.outputs.registry }}
           IMAGE: ${{ inputs.image }}
           TAG: ${{ steps.version.outputs.tag }}
+          MODE: ${{ steps.version.outputs.mode }}
+          SHA: ${{ github.sha }}
         run: |
           echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY"
           if docker buildx imagetools inspect "$IMAGE:$TAG" >/dev/null 2>&1; then
-            echo "::error::$IMAGE:$TAG already exists; released images are never overwritten — release a new version"
+            revisions=$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Image}}' |
+              jq -r '[.. | objects | select(has("Labels")) | .Labels["org.opencontainers.image.revision"] // empty] | unique | join(" ")')
+            docker logout "https://$REGISTRY"
+            # A re-run of this very release whose tag step failed: the image is
+            # complete, only the git tag is missing.
+            if [ "$MODE" = release ] && [ "$revisions" = "$SHA" ]; then
+              echo "::notice::$IMAGE:$TAG was already published from $SHA: only the git tag is set"
+              echo "build=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::$IMAGE:$TAG already exists (revision ${revisions:-unknown}); released images are never overwritten — release a new version"
             exit 1
           fi
           docker logout "https://$REGISTRY"
+          echo "build=true" >> "$GITHUB_OUTPUT"
 
   build:
     needs: verify
+    if: needs.verify.outputs.build == 'true'
     name: build ${{ matrix.platform }}
     strategy:
       fail-fast: true
@@ -212,6 +268,7 @@ jobs:
           SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
           REVISION: ${{ github.sha }}
           VERSION: ${{ needs.verify.outputs.tag }}
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
         run: |
           args=(--platform "$PLATFORM" -f "$DOCKERFILE"
                 --label "org.opencontainers.image.source=$SOURCE_URL"
@@ -236,7 +293,7 @@ jobs:
             touch "$RUNNER_TEMP/digests/${digest#sha256:}"
             docker logout "https://$REGISTRY"
           fi
-          echo "artifact=digest-$(echo "$PLATFORM" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+          echo "artifact=${ARTIFACT_PREFIX}digest-$(echo "$PLATFORM" | tr '/' '-')" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: needs.verify.outputs.push == 'true'
         with:
@@ -247,7 +304,7 @@ jobs:
 
   publish:
     needs: [verify, build]
-    if: needs.verify.outputs.push == 'true'
+    if: needs.verify.outputs.push == 'true' && needs.verify.outputs.build == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -258,7 +315,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: digest-*
+          pattern: ${{ inputs.artifact-prefix }}digest-*
           path: ${{ runner.temp }}/digests
           merge-multiple: true
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -304,7 +361,35 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-sbom
+          name: ${{ inputs.artifact-prefix }}release-sbom
           path: ${{ runner.temp }}/sbom
           if-no-files-found: error
           retention-days: 90
+
+  tag:
+    needs: [verify, publish]
+    # After a publish, or on a re-run whose image was already complete.
+    if: >-
+      always() && inputs.create-tag && needs.verify.result == 'success' &&
+      needs.verify.outputs.mode == 'release' &&
+      (needs.publish.result == 'success' || needs.verify.outputs.build == 'false')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          persist-credentials: false
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+      - name: git tag ${{ needs.verify.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          SHA: ${{ github.sha }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          MESSAGE=$(head -n1 <<<"$MESSAGE")
+          MESSAGE=${MESSAGE% (#*)} scripts/release.sh tag

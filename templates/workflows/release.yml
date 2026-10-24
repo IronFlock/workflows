@@ -1,0 +1,36 @@
+# Caller template for the release of a container image.
+# Copy to .github/workflows/release.yml and adjust `paths` and the `with:` block.
+#
+# The merge of a release pull request (`just release-patch`: version bump,
+# title `release <name> v<version>`) publishes the image and sets the tag.
+# A no-release merge starts nothing: `paths` holds only the version file, and
+# when a no-release PR touches it anyway (a dependency in package.json) the
+# job below is skipped by its merge title and no runner starts.
+# Run by hand (workflow_dispatch) it is a dry run: both platform builds, no push.
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release ')
+    uses: IronFlock/workflows/.github/workflows/release-image.yml@v1
+    permissions:
+      contents: write
+      id-token: write
+    with:
+      image: europe-docker.pkg.dev/<project>/<repository>/<name>
+      version-file: VERSION
+      workload-identity-provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      service-account: <publisher>@<project>.iam.gserviceaccount.com

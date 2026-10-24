@@ -1,0 +1,78 @@
+# Reusable check: every pull request into main is either
+#   a release PR     the version rises and the title is `release <name> <tag>`
+#                    (`just release-patch`); its merge starts the release
+#   a no-release PR  the title starts with `no-release:` (`just pr`) and the
+#                    version is unchanged; its merge releases nothing
+# Anything else fails. Callers list this job in the `needs` of their `ci-ok`,
+# so the main-branch ruleset enforces it. Outside a pull request it passes.
+#
+# The title is read from the event, so a title edited after the checks ran is
+# judged again only by the next push. The release workflow re-checks the
+# merged commit's title and version itself.
+name: release-intent
+
+on:
+  workflow_call:
+    inputs:
+      version-file:
+        description: File holding the version (one line, without the tag prefix), or a package.json (its `version`).
+        type: string
+        required: true
+      tag-prefix:
+        type: string
+        default: v
+      harness-ref:
+        description: Ref of IronFlock/workflows the harness scripts are taken from.
+        type: string
+        default: v1
+    outputs:
+      kind:
+        description: release or no-release (empty outside a pull request).
+        value: ${{ jobs.intent.outputs.kind }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  intent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      kind: ${{ steps.intent.outputs.kind }}
+    steps:
+      - name: not a pull request
+        if: github.event_name != 'pull_request'
+        run: echo "::notice::no pull request, no release intent to check"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        if: github.event_name == 'pull_request'
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: release or no-release
+        id: intent
+        if: github.event_name == 'pull_request'
+        env:
+          VERSION_FILE: ${{ inputs.version-file }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: '"$HARNESS/scripts/release.sh" intent'

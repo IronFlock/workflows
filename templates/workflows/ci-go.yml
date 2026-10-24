@@ -1,10 +1,11 @@
-# Caller template for a Go repository: gate + workflow lint.
-# Copy to .github/workflows/ci.yml and adjust the `with:` block.
+# Caller template for a Go repository: gate + workflow lint + release intent.
+# Copy to .github/workflows/ci.yml and adjust the `with:` blocks.
+# Runs on pull requests into main only: the ruleset lets nothing reach main
+# without this check, so a run after the merge would test the same tree again.
 name: ci
 
 on:
   pull_request:
-  push:
     branches: [main]
   workflow_dispatch:
 
@@ -25,11 +26,18 @@ jobs:
   workflows:
     uses: IronFlock/workflows/.github/workflows/workflows-lint.yml@v1
 
+  # Every pull request is a release PR (version bump, `just release-patch`) or
+  # a no-release PR (title `no-release: ...`, `just pr`).
+  intent:
+    uses: IronFlock/workflows/.github/workflows/release-intent.yml@v1
+    with:
+      version-file: VERSION
+
   # The one required check of the main-branch ruleset: green only when every
   # job above succeeded (skipped or cancelled counts as failed).
   ci-ok:
     if: ${{ always() }}
-    needs: [gate, workflows]
+    needs: [gate, workflows, intent]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
