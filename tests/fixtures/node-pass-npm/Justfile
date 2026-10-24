@@ -8,3 +8,8 @@ test:
 
 build:
     node -e 'import("./sum.js").then((m) => process.exit(m.sum(1, 1) === 2 ? 0 : 1))'
+
+# For the self-test of node-gate's `tools` input: bun must be on PATH.
+test-with-tool:
+    bun --version
+    node --test

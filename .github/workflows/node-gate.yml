@@ -35,6 +35,10 @@ on:
         description: Comma list of jobs to skip (lint, unit, build).
         type: string
         default: ""
+      tools:
+        description: Extra tools from tools.lock to install (space-separated), e.g. bun for bun:test suites in an npm repository.
+        type: string
+        default: ""
       lockfile-check:
         description: Fail when a lockfile of the other package manager is present.
         type: boolean
@@ -94,12 +98,15 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager == 'npm' && 'npm' || '' }}
           cache-dependency-path: ${{ inputs.package-manager == 'npm' && format('{0}/package-lock.json', inputs.working-directory) || '' }}
-      - name: install just (and bun)
+      - name: install just (and bun, extra tools)
         env:
           PM: ${{ inputs.package-manager }}
+          TOOLS: ${{ inputs.tools }}
         run: |
           "$HARNESS/scripts/install-tool.sh" just
           if [ "$PM" = bun ]; then "$HARNESS/scripts/install-tool.sh" bun; fi
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          if [ -n "$TOOLS" ]; then "$HARNESS/scripts/install-tool.sh" $TOOLS; fi
       - name: install dependencies (lockfile only)
         working-directory: ${{ inputs.working-directory }}
         env:
@@ -138,12 +145,15 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager == 'npm' && 'npm' || '' }}
           cache-dependency-path: ${{ inputs.package-manager == 'npm' && format('{0}/package-lock.json', inputs.working-directory) || '' }}
-      - name: install just (and bun)
+      - name: install just (and bun, extra tools)
         env:
           PM: ${{ inputs.package-manager }}
+          TOOLS: ${{ inputs.tools }}
         run: |
           "$HARNESS/scripts/install-tool.sh" just
           if [ "$PM" = bun ]; then "$HARNESS/scripts/install-tool.sh" bun; fi
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          if [ -n "$TOOLS" ]; then "$HARNESS/scripts/install-tool.sh" $TOOLS; fi
       - name: install dependencies (lockfile only)
         working-directory: ${{ inputs.working-directory }}
         env:
@@ -182,12 +192,15 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager == 'npm' && 'npm' || '' }}
           cache-dependency-path: ${{ inputs.package-manager == 'npm' && format('{0}/package-lock.json', inputs.working-directory) || '' }}
-      - name: install just (and bun)
+      - name: install just (and bun, extra tools)
         env:
           PM: ${{ inputs.package-manager }}
+          TOOLS: ${{ inputs.tools }}
         run: |
           "$HARNESS/scripts/install-tool.sh" just
           if [ "$PM" = bun ]; then "$HARNESS/scripts/install-tool.sh" bun; fi
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          if [ -n "$TOOLS" ]; then "$HARNESS/scripts/install-tool.sh" $TOOLS; fi
       - name: install dependencies (lockfile only)
         working-directory: ${{ inputs.working-directory }}
         env:
