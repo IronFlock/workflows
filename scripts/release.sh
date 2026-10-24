@@ -32,6 +32,13 @@
 #       set the annotated tag of a release through the GitHub API. Env: TAG,
 #       SHA, MESSAGE, REPO, GH_TOKEN. A tag already on SHA passes (re-run); a
 #       tag on another commit fails.
+#
+#   release.sh promote
+#       fast-forward branch BRANCH to the released commit through the GitHub
+#       API (e.g. the branch a hosting service deploys from). Env: BRANCH, SHA,
+#       REPO, GH_TOKEN. A missing branch is created; a branch already on SHA
+#       passes (re-run); a branch that SHA does not descend from fails (never a
+#       force push).
 set -euo pipefail
 
 out() {
@@ -157,10 +164,31 @@ tag() {
   echo "tagged $TAG on $SHA"
 }
 
+promote() {
+  local current status
+  if ! current=$(gh api "repos/$REPO/git/ref/heads/$BRANCH" --jq .object.sha 2>/dev/null); then
+    gh api "repos/$REPO/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$SHA" >/dev/null
+    echo "created $BRANCH on $SHA"
+    return 0
+  fi
+  if [ "$current" = "$SHA" ]; then
+    echo "$BRANCH is already on $SHA"
+    return 0
+  fi
+  status=$(gh api "repos/$REPO/compare/$current...$SHA" --jq .status)
+  if [ "$status" != ahead ]; then
+    echo "::error::$BRANCH is on $current, which $SHA does not descend from ($status): not a fast-forward"
+    return 1
+  fi
+  gh api "repos/$REPO/git/refs/heads/$BRANCH" -X PATCH -f sha="$SHA" -F force=false >/dev/null
+  echo "moved $BRANCH from $current to $SHA"
+}
+
 case "${1:-}" in
   version) version "$2" "${3:-}" ;;
   intent) intent ;;
   mode) mode ;;
   tag) tag ;;
+  promote) promote ;;
   *) echo "usage: release.sh version <file> [<rev>] | intent | mode | tag" >&2; exit 2 ;;
 esac

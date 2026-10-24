@@ -154,19 +154,28 @@ while [ $# -gt 0 ]; do
         ref=*) ref=${2#*=} ;;
       esac
       shift 2 ;;
-    --jq) shift 2 ;;
+    --jq | -X | -F) shift 2 ;;
     *) shift ;;
   esac
 done
 case "$path" in
   */git/ref/tags/*) cat "$state/ref-${path##*/}" 2>/dev/null || exit 1 ;;
+  */git/ref/heads/*) cat "$state/head-${path##*/}" 2>/dev/null || exit 1 ;;
+  */git/refs/heads/*) echo "$sha" > "$state/head-${path##*/}" ;;
+  */compare/*)
+    range=${path##*/}
+    if grep -qx "${range%...*} ${range#*...}" "$state/ancestors" 2>/dev/null; then echo ahead; else echo diverged; fi ;;
   */git/tags/*) cat "$state/obj-${path##*/}" ;;
   */git/tags)
     obj=t$RANDOM
     echo "$object" > "$state/obj-$obj"
     echo "$message" > "$state/msg-$obj"
     echo "$obj" ;;
-  */git/refs) echo "tag $sha" > "$state/ref-${ref##*/}" ;;
+  */git/refs)
+    case "$ref" in
+      refs/heads/*) echo "$sha" > "$state/head-${ref##*/}" ;;
+      *) echo "tag $sha" > "$state/ref-${ref##*/}" ;;
+    esac ;;
   *) echo "fake gh: unexpected $path" >&2; exit 2 ;;
 esac
 FAKE
@@ -183,6 +192,23 @@ check "tag: a re-run on the same commit passes" 0 tag v3.0.0 aaa
 check "tag: the same tag on another commit fails" 1 tag v3.0.0 bbb
 echo "commit ccc" > "$work/gh/ref-v3.0.1"
 check "tag: a lightweight tag on the same commit passes" 0 tag v3.0.1 ccc
+
+promote() { # promote <sha>
+  PATH="$work/bin:$PATH" FAKE_GH_STATE="$work/gh" REPO=o/r BRANCH=production SHA=$1 \
+    GH_TOKEN=unused "$script" promote
+}
+head_is() { # head_is <name> <sha>
+  if [ "$(cat "$work/gh/head-production" 2>/dev/null)" = "$2" ]; then echo "ok   $1"; else
+    echo "FAIL $1: production is on '$(cat "$work/gh/head-production" 2>/dev/null)', expected $2"; failures=$((failures + 1)); fi
+}
+check "promote: a missing branch is created" 0 promote aaa
+head_is "promote: created on the release commit" aaa
+check "promote: a re-run on the same commit passes" 0 promote aaa
+echo "aaa bbb" > "$work/gh/ancestors"
+check "promote: a fast-forward moves the branch" 0 promote bbb
+head_is "promote: moved to the new release" bbb
+check "promote: a commit that does not descend fails" 1 promote zzz
+head_is "promote: not moved after a refusal" bbb
 
 [ "$failures" = 0 ] || { echo "$failures failure(s)"; exit 1; }
 echo "all release.sh tests passed"
