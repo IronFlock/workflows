@@ -1,0 +1,8 @@
+# actionlint configuration of this repository.
+paths:
+  # The caller templates call the repository's own release.yml
+  # (./.github/workflows/release.yml), which exists only once a template is
+  # copied into a repository.
+  templates/workflows/**/*.yml:
+    ignore:
+      - 'could not read reusable workflow file for "./.github/workflows/release.yml"'

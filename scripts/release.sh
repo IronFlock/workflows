@@ -64,6 +64,7 @@ intent() {
   [ -n "$head" ] || { echo "::error::$VERSION_FILE has no version at $HEAD_SHA"; return 1; }
 
   if [ "$head" = "$base" ]; then
+    # shellcheck disable=SC2153 # TITLE comes from the environment (see the header)
     if [[ "$TITLE" =~ ^release\ [^\ ]+\ ${TAG_PREFIX}[0-9] ]]; then
       echo "::error::the title reads like a release, but $VERSION_FILE is unchanged ($head): bump it (just release-patch) or retitle the pull request"
       return 1
