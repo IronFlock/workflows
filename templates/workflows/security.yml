@@ -5,8 +5,8 @@ name: security
 
 on:
   pull_request:
-  push:
     branches: [main]
+  # Weekly on main: catches vulnerabilities disclosed against unchanged code.
   schedule:
     - cron: "17 6 * * 1"
   workflow_dispatch:

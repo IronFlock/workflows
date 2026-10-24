@@ -45,7 +45,9 @@ The inputs of each workflow are documented in its `on.workflow_call` block.
 | [python-gate.yml](.github/workflows/python-gate.yml) | `lint`, `unit`, `build` | Python gate: uv from `tools.lock`; with a `uv.lock`, `uv sync --frozen` (all groups) before the recipes, otherwise the recipes bring their own tools (pinned `uvx`) |
 | [security.yml](.github/workflows/security.yml) | `gitleaks`, `deps`, `semgrep`, `sbom`, `config`, `licenses`, `image`, `report` | security screening; `report` applies `fail-on` |
 | [workflows-lint.yml](.github/workflows/workflows-lint.yml) | `lint` | actionlint, zizmor, pinact on the caller's workflows; always blocking |
-| [release-image.yml](.github/workflows/release-image.yml) | `verify`, `build`, `publish` | release of a container image from a version tag: only commits on the protected `main`; native multi-arch build, SBOM + provenance attached, keyless push |
+| [release-intent.yml](.github/workflows/release-intent.yml) | `intent` | the version file decides: a rise makes a release PR (title `release <name> <tag>` required), an unchanged version a no-release PR; output `kind` gates the release dry run; listed in the `needs` of `ci-ok` |
+| [release-image.yml](.github/workflows/release-image.yml) | `verify`, `build`, `publish` | release of a container image on the merge of a release PR into the protected `main`; native multi-arch build, SBOM + provenance attached, keyless push; on a release PR a dry run (every platform build, no push); re-runs are safe; read rights only |
+| [release-tag.yml](.github/workflows/release-tag.yml) | `tag` | the annotated git tag of a release, after every image job of the caller; a tag always means "in the registry"; needs `contents: write` |
 | [selftest.yml](.github/workflows/selftest.yml) | — | proves the harness against [tests/fixtures](tests/fixtures) |
 
 Gates for Node, Python and chart/shell repositories follow the same pattern
@@ -83,15 +85,51 @@ as artifacts (`security-findings-*`, `security-sbom`) for 90 days. A workflow th
 calls `security.yml` more than once per run gives each call its own `artifact-prefix`. Public repositories also get
 the results in their Security tab.
 
+## Central logic, thin callers
+
+The logic lives here: the reusable workflows, the scripts and the tool pins
+(`tools.lock`). Each repository keeps only thin caller files — `ci.yml`,
+`security.yml`, `release.yml` — because GitHub starts workflows only from files
+in the repository itself. A caller holds the triggers, the repository's settings
+(image, version file, directory, targets) and `uses: IronFlock/workflows/...@v1`,
+plus jobs only that repository needs (integration tests, a second image). Copy
+them from [templates/workflows](templates/workflows). A change to the logic is
+made once here and reaches every repository when `v1` moves after a green
+self-test; a change to triggers or settings needs a pull request per repository.
+
 ## Protected main branch
 
 Each repository protects `main` with a ruleset: changes only through pull
-requests, which must be up to date with `main` and pass the required checks
-`ci-ok` and `security / report`; no force pushes, no deletion, no bypass. So
-every commit on `main` is green, and `release-image.yml` only checks that the
-tagged commit is on `main`. `ci-ok` is a small job at the end of the caller's
-`ci.yml` that succeeds only when every other job in it succeeded (see
-[templates/workflows/ci-go.yml](templates/workflows/ci-go.yml)).
+requests, squash-merged, which must be up to date with `main` and pass the
+required checks `ci-ok` and `security / report`; no force pushes, no deletion,
+no bypass. So every commit on `main` is green, and `release-image.yml` only
+checks that the released commit is on `main`. `ci-ok` is a small job at the end
+of the caller's `ci.yml` that succeeds only when every other job in it
+succeeded (see [templates/workflows/ci-go.yml](templates/workflows/ci-go.yml)).
+
+The check workflows (`ci.yml`, `security.yml`) run on pull requests into
+`main`, plus the weekly security scan; a run after the merge would test the
+same tree again. The version file decides what a pull request is
+(`release-intent.yml`):
+
+| Kind | Made with | Title | Version | On the pull request | After the merge |
+|---|---|---|---|---|---|
+| release PR | `just release-patch` (`-minor`, `-major`) | `release <name> v<version>` | rises | ci (incl. the release dry run: every platform build, no push) + security | `release.yml` publishes the image, then sets the tag |
+| no-release PR | `just merge` | anything that does not read like a release | unchanged | ci + security | nothing runs |
+
+If a release run fails after the merge, `main` holds the new version without
+an image or tag; nothing reads it (deployments take versions from the
+registry). A transient or permission failure: fix the cause and re-run the run
+(safe: nothing is pushed twice, the tag comes last). A code failure: fix it in
+the next release PR; the unreleased version stays a gap in the history.
+
+`release.yml` runs on pushes to `main` that touch the version file, and its job
+only when the squash-merge title is a release title (`release <name> v...`;
+[templates/workflows/release.yml](templates/workflows/release.yml)). The
+identity provider grants the publisher service account only to main-branch
+pushes (and version tags) through `release-image.yml`. The caller's `tag` job
+(`release-tag.yml`) needs `contents: write`, and the GitHub Actions app as a
+bypass actor of the repository's `release tags v*` tag ruleset.
 
 ## Exceptions
 
@@ -115,15 +153,18 @@ The summary lists exceptions that expire within 30 days.
   [scripts/install-tool.sh](scripts/install-tool.sh); Go tools and semgrep are
   pinned in the workflows' `env` blocks; actions are pinned to commit SHAs.
 - **Self-test.** [selftest.yml](.github/workflows/selftest.yml) runs on every
-  change and weekly. The fixtures plant one finding per scanner (a fake key,
+  pull request and weekly. The fixtures plant one finding per scanner (a fake key,
   a reachable call into a vulnerable `golang.org/x/text`, a secret written to
   the console, a root container on an outdated base image, an unpinned action,
   a failing test); the self-test is green only when each one is reported and
   the clean fixture passes with every `fail-on` category set. Alerts that
   GitHub raises for the fixtures are expected.
-- **Releases.** Callers use the moving tag `v1`. Move it only to a commit
-  whose self-test is green:
+- **Releases.** Callers use the moving tag `v1`. Move it only to the merge
+  commit of a pull request whose self-test was green (squash merge of an
+  up-to-date branch: the same tree):
   `git tag -f v1 <sha> && git push -f origin v1`. Breaking input changes get
   `v2`.
 - **Report script.** `python3 -I scripts/test_sarif_summary.py` tests the
   categories, `fail-on`, VEX expiry and the code-scanning copy.
+- **Release script.** `bash scripts/test_release.sh` tests the release intent,
+  the run modes of `release-image.yml` and the idempotent tag.
