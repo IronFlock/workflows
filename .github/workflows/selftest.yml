@@ -203,6 +203,20 @@ jobs:
       workload-identity-provider: dry-run-unused
       service-account: dry-run-unused
 
+  # The version of a Node repository lives in package.json.
+  release-dry-run-package-json:
+    uses: ./.github/workflows/release-image.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      image: example.invalid/selftest/release
+      version-file: tests/fixtures/node-pass-npm/package.json
+      dockerfile: tests/fixtures/release/Dockerfile
+      context: tests/fixtures/release
+      workload-identity-provider: dry-run-unused
+      service-account: dry-run-unused
+
   assert-planted:
     needs: [security-planted, lint-planted]
     # Also when a scanner job broke: the counts then show what is missing.
@@ -233,7 +247,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-bun, node-gate-fail, security-clean, security-planted, release-dry-run, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-bun, node-gate-fail, security-clean, security-planted, release-dry-run, release-dry-run-package-json, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
