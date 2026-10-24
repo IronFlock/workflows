@@ -1,0 +1,39 @@
+# ------------------------------------------------------------------ release --
+# Pull requests into main, from IronFlock/workflows (scripts/pr.sh at v1):
+#   just merge [TITLE]      a no-release pull request from this feature branch
+#   just release-patch      a release pull request (-minor, -major): the bump
+#                           from main's version on top of this branch (or on a
+#                           new branch release/v<x> from an up-to-date main);
+#                           its merge publishes the image and sets the tag in CI
+# Both merge automatically once ci and security are green.
+RELEASE_NAME := "example"
+VERSION_FILE := "VERSION"
+# Every file _write-version changes; the release commit holds exactly these.
+VERSION_FILES := "VERSION"
+
+# Writes the version; called by pr.sh with the next version.
+_write-version version:
+    printf '%s\n' "{{version}}" > {{VERSION_FILE}}
+
+[positional-arguments]
+_pr *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    script=$(mktemp)
+    trap 'rm -f "$script"' EXIT
+    gh api -H 'Accept: application/vnd.github.raw' \
+        'repos/IronFlock/workflows/contents/scripts/pr.sh?ref=v1' > "$script"
+    bash "$script" "$@"
+
+[positional-arguments]
+merge TITLE="":
+    just _pr merge {{VERSION_FILE}} "$1"
+
+release-patch:
+    just _pr release patch {{RELEASE_NAME}} {{VERSION_FILE}} release.yml {{VERSION_FILES}}
+
+release-minor:
+    just _pr release minor {{RELEASE_NAME}} {{VERSION_FILE}} release.yml {{VERSION_FILES}}
+
+release-major:
+    just _pr release major {{RELEASE_NAME}} {{VERSION_FILE}} release.yml {{VERSION_FILES}}

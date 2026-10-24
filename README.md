@@ -141,6 +141,35 @@ deployments from `main` only, variable `RELEASE_APP_CLIENT_ID`, secret
 repository. Callers grant `contents: read` only and pass `secrets: inherit`:
 environment secrets reach a reusable workflow only that way.
 
+## Pull requests from a laptop
+
+`just merge` and `just release-patch|minor|major` behave the same in every
+repository: the Justfile fetches [scripts/pr.sh](scripts/pr.sh) at `v1` (with
+`gh`) and runs it. A repository only names its release, its version file and
+the files a bump changes, and writes the version in `_write-version`; copy
+[templates/repo/Justfile.release](templates/repo/Justfile.release).
+
+- `just merge [TITLE]`: pushes the current feature branch (also when origin
+  does not have it yet), opens the pull request and turns on auto-merge. It
+  refuses a changed version and a title starting with `release `.
+- `just release-patch`: the next version is computed from the version on
+  `origin/main`, so a second run on the same branch does not bump twice. The
+  release commit `release <name> v<x>` holds only the listed files and sits on
+  top of the branch's work; on an up-to-date `main` it goes on a new branch
+  `release/v<x>`. It then waits for the merge and for the release run, and
+  ends back on `main` (detached on `origin/main` in a worktree).
+
+Onboarding a repository onto this flow, besides the caller files:
+
+- `main` ruleset: squash merges only; repository setting "default commit
+  message" = pull request title (so the merge commit carries the checked
+  title).
+- Environment `release`: deployment branches `main` only; variable
+  `RELEASE_APP_CLIENT_ID`, secret `RELEASE_APP_PRIVATE_KEY`.
+- The release GitHub App installed on the repository and listed as bypass
+  actor of the `release tags v*` ruleset.
+- The publisher binding of the identity provider for the repository.
+
 ## Exceptions
 
 Each exception needs a reason and an expiry, and is reviewed in the pull
