@@ -42,6 +42,7 @@ The inputs of each workflow are documented in its `on.workflow_call` block.
 |---|---|---|
 | [go-gate.yml](.github/workflows/go-gate.yml) | `lint`, `unit`, `build` | Go gate; cross-build matrix from `targets` / `targets-file` |
 | [node-gate.yml](.github/workflows/node-gate.yml) | `lint`, `unit`, `build` | Node/Bun gate: `package-manager` bun or npm, installs from the lockfile only (`bun install --frozen-lockfile` / `npm ci`), fails on a lockfile of the other package manager; `skip` drops jobs a repository has no recipe for |
+| [python-gate.yml](.github/workflows/python-gate.yml) | `lint`, `unit`, `build` | Python gate: uv from `tools.lock`; with a `uv.lock`, `uv sync --frozen` (all groups) before the recipes, otherwise the recipes bring their own tools (pinned `uvx`) |
 | [security.yml](.github/workflows/security.yml) | `gitleaks`, `deps`, `semgrep`, `sbom`, `config`, `licenses`, `image`, `report` | security screening; `report` applies `fail-on` |
 | [workflows-lint.yml](.github/workflows/workflows-lint.yml) | `lint` | actionlint, zizmor, pinact on the caller's workflows; always blocking |
 | [release-image.yml](.github/workflows/release-image.yml) | `verify`, `build`, `publish` | release of a container image from a version tag: only commits on the protected `main`; native multi-arch build, SBOM + provenance attached, keyless push |
