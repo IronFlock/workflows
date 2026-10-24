@@ -60,7 +60,10 @@ on:
         type: string
         default: "."
       build-args:
-        description: Newline-separated KEY=VALUE build arguments.
+        description: >-
+          Newline-separated KEY=VALUE build arguments; {tag} in a value becomes
+          the release tag (VERSION={tag} -> VERSION=v1.2.3; a dry run gets the
+          tag it would release).
         type: string
         default: ""
       platforms:
@@ -268,7 +271,7 @@ jobs:
                 --label "org.opencontainers.image.version=$VERSION"
                 --metadata-file "$RUNNER_TEMP/metadata.json")
           while IFS= read -r arg; do
-            [ -n "$arg" ] && args+=(--build-arg "$arg")
+            [ -n "$arg" ] && args+=(--build-arg "${arg//\{tag\}/$VERSION}")
           done <<<"$BUILD_ARGS"
           if [ "$PUSH" = true ]; then
             echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY"

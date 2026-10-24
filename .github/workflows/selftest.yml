@@ -65,6 +65,8 @@ jobs:
         run: python3 -I scripts/test_sarif_summary.py
       - name: release.sh unit tests
         run: bash scripts/test_release.sh
+      - name: pr.sh unit tests
+        run: bash scripts/test_pr.sh
       # Public repository: no internal document names or plan IDs.
       - name: public-repo hygiene
         run: |
@@ -258,6 +260,7 @@ jobs:
       version-file: tests/fixtures/release/version.txt
       dockerfile: tests/fixtures/release/Dockerfile
       context: tests/fixtures/release
+      build-args: VERSION={tag}
       workload-identity-provider: dry-run-unused
       service-account: dry-run-unused
       artifact-prefix: version-file-
@@ -274,6 +277,7 @@ jobs:
       version-file: tests/fixtures/node-pass-npm/package.json
       dockerfile: tests/fixtures/release/Dockerfile
       context: tests/fixtures/release
+      build-args: VERSION={tag}
       workload-identity-provider: dry-run-unused
       service-account: dry-run-unused
       artifact-prefix: package-json-
