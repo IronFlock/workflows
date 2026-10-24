@@ -112,6 +112,16 @@ jobs:
       working-directory: tests/fixtures/node-pass-npm
       harness-ref: ${{ github.sha }}
 
+  # An npm repository whose tests need an extra tool (bun) from tools.lock.
+  node-gate-npm-tools:
+    uses: ./.github/workflows/node-gate.yml
+    with:
+      package-manager: npm
+      working-directory: tests/fixtures/node-pass-npm
+      tools: bun
+      test-recipe: test-with-tool
+      harness-ref: ${{ github.sha }}
+
   node-gate-bun:
     uses: ./.github/workflows/node-gate.yml
     with:
@@ -264,7 +274,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-bun, node-gate-fail, security-clean, security-clean-node, security-planted, release-dry-run, release-dry-run-package-json, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, security-clean, security-clean-node, security-planted, release-dry-run, release-dry-run-package-json, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
