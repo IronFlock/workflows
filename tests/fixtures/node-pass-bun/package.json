@@ -1,0 +1,9 @@
+{
+  "name": "fixture-node-pass-bun",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "fixture-lib": "file:./lib"
+  }
+}

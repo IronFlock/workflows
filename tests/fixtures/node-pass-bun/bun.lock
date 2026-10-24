@@ -1,0 +1,15 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "fixture-node-pass-bun",
+      "dependencies": {
+        "fixture-lib": "file:./lib",
+      },
+    },
+  },
+  "packages": {
+    "fixture-lib": ["fixture-lib@file:lib", {}],
+  }
+}
