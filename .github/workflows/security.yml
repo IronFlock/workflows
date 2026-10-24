@@ -241,12 +241,16 @@ jobs:
           else
             (cd "$WD" && go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" -format sarif ./... > "$RUNNER_TEMP/findings/govulncheck.sarif")
           fi
+      # Installed in a step of its own: install-tool.sh extends GITHUB_PATH,
+      # which takes effect from the next step on.
+      - name: install osv-scanner (tools.lock)
+        if: contains(inputs.languages, 'node') || contains(inputs.languages, 'python')
+        run: '"$HARNESS/scripts/install-tool.sh" osv-scanner'
       - name: osv-scanner (lockfiles)
         if: contains(inputs.languages, 'node') || contains(inputs.languages, 'python')
         env:
           WD: ${{ inputs.working-directory }}
         run: |
-          "$HARNESS/scripts/install-tool.sh" osv-scanner
           set +e
           osv-scanner scan source --recursive --format sarif --output "$RUNNER_TEMP/findings/osv.sarif" "$WD"
           rc=$?
@@ -372,12 +376,14 @@ jobs:
           else
             (cd "$WD" && go mod download && go run "github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@$CYCLONEDX_GOMOD_VERSION" mod -licenses -json -output "$RUNNER_TEMP/sbom/sbom.cdx.json")
           fi
+      - name: install trivy (tools.lock)
+        if: ${{ !contains(inputs.languages, 'go') }}
+        run: '"$HARNESS/scripts/install-tool.sh" trivy'
       - name: SBOM (other ecosystems)
         if: ${{ !contains(inputs.languages, 'go') }}
         env:
           WD: ${{ inputs.working-directory }}
         run: |
-          "$HARNESS/scripts/install-tool.sh" trivy
           trivy fs --quiet --format cyclonedx --output "$RUNNER_TEMP/sbom/sbom.cdx.json" "$WD"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
