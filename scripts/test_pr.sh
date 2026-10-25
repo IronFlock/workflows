@@ -41,6 +41,8 @@ echo "just $*" >>"$STUB/log"
 vf=$(cat "$STUB/vf")
 if [ "$(basename "$vf")" = package.json ]; then
   jq --arg v "$2" '.version = $v' "$vf" >"$vf.tmp" && mv "$vf.tmp" "$vf"
+elif [ "$(basename "$vf")" = pyproject.toml ]; then
+  sed -i.bak "/^\[project\]/,/^\[/ s/^version = .*/version = \"$2\"/" "$vf" && rm -f "$vf.bak"
 else
   echo "$2" >"$vf"
 fi
@@ -65,6 +67,8 @@ setup() {
   if [ "$(basename "$1")" = package.json ]; then
     mkdir -p "$repo/$(dirname "$1")"
     printf '{\n  "name": "x",\n  "version": "%s"\n}\n' "$2" >"$repo/$1"
+  elif [ "$(basename "$1")" = pyproject.toml ]; then
+    printf '[project]\nname = "x"\nversion = "%s"\n\n[tool.later]\nversion = "9.9.9"\n' "$2" >"$repo/$1"
   else
     mkdir -p "$repo/$(dirname "$1")"
     echo "$2" >"$repo/$1"
@@ -210,6 +214,12 @@ setup backend/package.json 1.4.22
 ci_tag v1.4.23
 check "release: package.json in a subdirectory" 0 release patch reauth-login backend/package.json release.yml backend/package.json
 expect "release: package.json at 1.4.23" test "$(git -C "$origin" show feat:backend/package.json | jq -r .version)" = 1.4.23
+
+setup pyproject.toml 1.10.0
+ci_tag v1.10.1
+check "release: pyproject.toml" 0 release patch x pyproject.toml release.yml pyproject.toml
+expect "release: [project] version at 1.10.1" grep -qx 'version = "1.10.1"' <(git -C "$origin" show feat:pyproject.toml)
+expect "release: other tables untouched" grep -qx 'version = "9.9.9"' <(git -C "$origin" show feat:pyproject.toml)
 
 [ "$fail" = 0 ] && echo "all pr.sh tests passed"
 exit "$fail"

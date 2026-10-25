@@ -3,8 +3,9 @@
 # from the repository root of a full checkout (history and tags).
 #
 #   release.sh version <file> [<rev>]
-#       print the version in <file>: a package.json's `version`, otherwise the
-#       file's content without whitespace. With <rev> the file is read at that
+#       print the version in <file>: a package.json's `version`, a
+#       pyproject.toml's `[project] version`, otherwise the file's content
+#       without whitespace. With <rev> the file is read at that
 #       commit; a file missing there prints nothing.
 #
 #   release.sh intent
@@ -55,6 +56,7 @@ version() {
   fi
   case "$file" in
     package.json | */package.json) jq -r '.version // empty' <<<"$content" ;;
+    pyproject.toml | */pyproject.toml) awk '/^\[/ { p = ($0 ~ /^\[project\][[:space:]]*(#.*)?$/) } p && /^version[[:space:]]*=/ { sub(/^version[[:space:]]*=[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, ""); gsub(/["'"'"']/, ""); print; exit }' <<<"$content" ;;
     *) tr -d '[:space:]' <<<"$content" ;;
   esac
 }

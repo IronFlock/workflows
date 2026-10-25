@@ -30,8 +30,9 @@ wait_s=${PR_WAIT_SECONDS:-20}
 
 die() { echo "$*" >&2; exit 1; }
 
-# version <file> [<rev>]: a package.json's `version`, otherwise the content
-# without whitespace (same rule as release.sh).
+# version <file> [<rev>]: a package.json's `version`, a pyproject.toml's
+# `[project] version`, otherwise the content without whitespace (same rule as
+# release.sh).
 version() {
   local content
   if [ -n "${2:-}" ]; then
@@ -39,11 +40,11 @@ version() {
   else
     content=$(cat "$1")
   fi
-  if [ "$(basename "$1")" = package.json ]; then
-    jq -r '.version // empty' <<<"$content"
-  else
-    tr -d '[:space:]' <<<"$content"
-  fi
+  case "$(basename "$1")" in
+    package.json) jq -r '.version // empty' <<<"$content" ;;
+    pyproject.toml) awk '/^\[/ { p = ($0 ~ /^\[project\][[:space:]]*(#.*)?$/) } p && /^version[[:space:]]*=/ { sub(/^version[[:space:]]*=[[:space:]]*/, ""); sub(/[[:space:]]*#.*$/, ""); gsub(/["'"'"']/, ""); print; exit }' <<<"$content" ;;
+    *) tr -d '[:space:]' <<<"$content" ;;
+  esac
 }
 
 next_version() { # next_version <level> <x.y.z>
