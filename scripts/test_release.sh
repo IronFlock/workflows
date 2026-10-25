@@ -45,6 +45,8 @@ repo() {
 setv() { # setv <dir> <file> <version>
   case "$2" in
     package.json) printf '{\n  "name": "x",\n  "version": "%s"\n}\n' "$3" > "$1/$2" ;;
+    # Other tables with a version key: only [project] counts.
+    pyproject.toml) printf '[tool.other]\nversion = "0.0.1"\n\n[project]\nname = "x"\nversion = "%s"  # uv version\n\n[tool.later]\nversion = "9.9.9"\n' "$3" > "$1/$2" ;;
     *) printf '%s\n' "$3" > "$1/$2" ;;
   esac
 }
@@ -60,7 +62,7 @@ intent() { # intent <dir> <file> <base> <head> <title>
   (cd "$1" && VERSION_FILE=$2 TAG_PREFIX=v BASE_SHA=$3 HEAD_SHA=$4 TITLE=$5 "$script" intent)
 }
 
-for vf in VERSION package.json; do
+for vf in VERSION package.json pyproject.toml; do
   r="$work/intent-$vf"
   repo "$r" "$vf" 1.2.3
   base=$(git -C "$r" rev-parse HEAD)

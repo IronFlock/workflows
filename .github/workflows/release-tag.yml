@@ -19,7 +19,7 @@ on:
   workflow_call:
     inputs:
       version-file:
-        description: File holding the version (one line, without the tag prefix), or a package.json (its `version`).
+        description: File holding the version (one line, without the tag prefix), a package.json (its `version`) or a pyproject.toml (its `[project] version`).
         type: string
         required: true
       tag-prefix:
@@ -35,6 +35,10 @@ on:
           missing; never force-pushed.
         type: string
         default: ""
+      github-release:
+        description: Create the GitHub release of the tag (generated notes) after the tag.
+        type: boolean
+        default: false
       harness-ref:
         description: Ref of IronFlock/workflows the harness scripts are taken from.
         type: string
@@ -89,9 +93,13 @@ jobs:
           COMMIT_TITLE: ${{ github.event.head_commit.message }}
           SHA: ${{ github.sha }}
         run: '"$HARNESS/scripts/release.sh" mode'
+      # `released`: a re-run after the tag; the steps after the tag catch up
+      # (each passes when its work is already done).
       - name: release App token (contents of this repository)
         id: app
-        if: steps.version.outputs.mode == 'release'
+        if: >-
+          steps.version.outputs.mode == 'release' || (steps.version.outputs.mode == 'released' &&
+          (inputs.promote-branch != '' || inputs.github-release))
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
@@ -110,10 +118,26 @@ jobs:
           MESSAGE=$(head -n1 <<<"$MESSAGE")
           MESSAGE=${MESSAGE% (#*)} "$HARNESS/scripts/release.sh" tag
       - name: fast-forward ${{ inputs.promote-branch }}
-        if: steps.version.outputs.mode == 'release' && inputs.promote-branch != ''
+        if: >-
+          (steps.version.outputs.mode == 'release' || steps.version.outputs.mode == 'released') &&
+          inputs.promote-branch != ''
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
           BRANCH: ${{ inputs.promote-branch }}
           SHA: ${{ github.sha }}
         run: '"$HARNESS/scripts/release.sh" promote'
+      - name: GitHub release ${{ steps.version.outputs.tag }}
+        if: >-
+          (steps.version.outputs.mode == 'release' || steps.version.outputs.mode == 'released') &&
+          inputs.github-release
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "the GitHub release $TAG exists"
+          else
+            gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TAG" --generate-notes
+          fi

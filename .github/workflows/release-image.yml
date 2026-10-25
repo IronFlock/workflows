@@ -47,7 +47,7 @@ on:
         type: string
         required: true
       version-file:
-        description: File holding the version (one line, without the tag prefix), or a package.json (its `version`).
+        description: File holding the version (one line, without the tag prefix), a package.json (its `version`) or a pyproject.toml (its `[project] version`).
         type: string
         required: true
       tag-prefix:
