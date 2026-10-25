@@ -66,6 +66,14 @@ on:
           tag it would release).
         type: string
         default: ""
+      build-contexts-artifact:
+        description: >-
+          Name of an artifact of this run (uploaded by an earlier job of the
+          caller) whose top-level directories become named build contexts
+          (`COPY --from=<directory name>`), e.g. data prepared with secrets the
+          image build must not see. Empty = none.
+        type: string
+        default: ""
       platforms:
         description: >-
           JSON list of {"platform": ..., "runner": ...}. Native runners per
@@ -239,6 +247,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.build-contexts-artifact != ''
+        with:
+          name: ${{ inputs.build-contexts-artifact }}
+          path: ${{ runner.temp }}/build-contexts
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - id: auth
@@ -273,6 +286,11 @@ jobs:
           while IFS= read -r arg; do
             [ -n "$arg" ] && args+=(--build-arg "${arg//\{tag\}/$VERSION}")
           done <<<"$BUILD_ARGS"
+          if [ -d "$RUNNER_TEMP/build-contexts" ]; then
+            for dir in "$RUNNER_TEMP"/build-contexts/*/; do
+              [ -d "$dir" ] && args+=(--build-context "$(basename "$dir")=$dir")
+            done
+          fi
           if [ "$PUSH" = true ]; then
             echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY"
             args+=(--sbom=true --provenance=mode=max
