@@ -1,0 +1,8 @@
+# The release workflow's dry run with a named build context from an artifact
+# (build-contexts-artifact): the build fails unless `extra` holds the file the
+# self-test uploaded.
+FROM alpine:3.24
+COPY --from=extra marker.txt /marker.txt
+RUN test "$(cat /marker.txt)" = "from the artifact"
+USER 65534:65534
+CMD ["cat", "/marker.txt"]

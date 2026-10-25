@@ -283,6 +283,35 @@ jobs:
       artifact-prefix: package-json-
       harness-ref: ${{ github.sha }}
 
+  # A named build context from an artifact of the same run.
+  build-context-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: mkdir -p ctx/extra && echo "from the artifact" > ctx/extra/marker.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: selftest-build-contexts
+          path: ctx
+          retention-days: 1
+
+  release-dry-run-build-context:
+    needs: [build-context-artifact]
+    uses: ./.github/workflows/release-image.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      image: example.invalid/selftest/release
+      version-file: tests/fixtures/release/version.txt
+      dockerfile: tests/fixtures/release/Dockerfile.context
+      context: tests/fixtures/release
+      build-contexts-artifact: selftest-build-contexts
+      workload-identity-provider: dry-run-unused
+      service-account: dry-run-unused
+      artifact-prefix: build-context-
+      harness-ref: ${{ github.sha }}
+
   assert-planted:
     needs: [security-planted, lint-planted]
     # Also when a scanner job broke: the counts then show what is missing.
@@ -313,7 +342,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, security-clean, security-clean-node, security-planted, release-dry-run, release-dry-run-package-json, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, security-clean, security-clean-node, security-planted, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
