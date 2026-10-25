@@ -155,7 +155,10 @@ the files a bump changes, and writes the version in `_write-version`; copy
 
 - `just merge [TITLE]`: pushes the current feature branch (also when origin
   does not have it yet), opens the pull request and turns on auto-merge. It
-  refuses a changed version and a title starting with `release `.
+  refuses a changed version and a title starting with `release `. A
+  repository without a version, whose `main` is the publication (a content
+  site, a plugin marketplace), passes `-` as version file and has no release
+  recipes.
 - `just release-patch`: the next version is computed from the version on
   `origin/main`, so a second run on the same branch does not bump twice. The
   release commit `release <name> v<x>` holds only the listed files and sits on

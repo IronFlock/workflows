@@ -121,6 +121,13 @@ check "merge: an existing pull request is reused" 0 merge VERSION "docs: another
 expect "merge: no second pull request" not_logged "gh pr create"
 
 setup VERSION 1.2.3
+git -C "$repo" rm -q VERSION
+git -C "$repo" commit -q -m "a repository without a version"
+# stdin holds a version: read as a file name, '-' would compare it with main's.
+check "merge: '-' for a repository without a version file" 0 merge - <<<"9.9.9"
+expect "merge: '-' still opens the pull request" logged "gh pr create --base main --head feat"
+
+setup VERSION 1.2.3
 git -C "$repo" switch -q main
 check "merge: refused on main" 1 merge VERSION
 

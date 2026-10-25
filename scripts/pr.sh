@@ -5,11 +5,12 @@
 # script at IronFlock/workflows@v1 and runs it, so the flow is the same
 # everywhere (see "Pull requests from a laptop" in the README).
 #
-#   pr.sh merge <version-file> [<title>]
+#   pr.sh merge <version-file|-> [<title>]
 #       a no-release pull request from the current feature branch (pushed even
 #       if origin does not have it yet), titled <title> (default: the subject
 #       of the branch's first commit), merged automatically (squash) once the
-#       required checks pass. The version must equal main's, and the title must
+#       required checks pass. The version must equal main's (`-`: a repository
+#       without a version, whose main is the publication), and the title must
 #       not start with "release ": such a merge releases nothing.
 #
 #   pr.sh release <patch|minor|major> <name> <version-file> <workflow> <file>...
@@ -100,7 +101,7 @@ leave_branch() {
 }
 
 cmd_merge() {
-  [ $# -ge 1 ] || die "usage: pr.sh merge <version-file> [<title>]"
+  [ $# -ge 1 ] || die "usage: pr.sh merge <version-file|-> [<title>]"
   local vf=$1 title=${2:-} branch here there
   branch=$(git rev-parse --abbrev-ref HEAD)
   if [ "$branch" = main ] || [ "$branch" = HEAD ]; then
@@ -110,10 +111,12 @@ cmd_merge() {
   git fetch --quiet origin main
   git merge-base --is-ancestor origin/main HEAD ||
     die "merge: $branch does not contain origin/main (git rebase origin/main)"
-  here=$(version "$vf")
-  there=$(version "$vf" origin/main)
-  [ "$here" = "$there" ] ||
-    die "merge: $branch changes the version ($there -> $here): that is a release (just release-patch)"
+  if [ "$vf" != - ]; then
+    here=$(version "$vf")
+    there=$(version "$vf" origin/main)
+    [ "$here" = "$there" ] ||
+      die "merge: $branch changes the version ($there -> $here): that is a release (just release-patch)"
+  fi
   [ -n "$title" ] || title=$(git log --reverse --format=%s origin/main..HEAD | head -n1)
   [ -n "$title" ] || die "merge: no commits on $branch beyond main"
   if release_title "$title"; then
