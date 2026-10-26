@@ -283,6 +283,39 @@ jobs:
       artifact-prefix: package-json-
       harness-ref: ${{ github.sha }}
 
+  # A second release project in a repository: git tag db-v<version>, image tag
+  # v<version>.
+  release-dry-run-image-tag:
+    uses: ./.github/workflows/release-image.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      image: example.invalid/selftest/release
+      version-file: tests/fixtures/release/version.txt
+      tag-prefix: db-v
+      image-tag-prefix: v
+      dockerfile: tests/fixtures/release/Dockerfile
+      context: tests/fixtures/release
+      build-args: VERSION={tag}
+      workload-identity-provider: dry-run-unused
+      service-account: dry-run-unused
+      artifact-prefix: image-tag-
+      harness-ref: ${{ github.sha }}
+
+  assert-image-tag:
+    needs: [release-dry-run-image-tag]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: git tag db-v0.0.1, image tag v0.0.1
+        env:
+          TAG: ${{ needs.release-dry-run-image-tag.outputs.tag }}
+          IMAGE_TAG: ${{ needs.release-dry-run-image-tag.outputs.image-tag }}
+        run: |
+          echo "tag $TAG, image tag $IMAGE_TAG"
+          [ "$TAG" = db-v0.0.1 ] && [ "$IMAGE_TAG" = v0.0.1 ]
+
   # A named build context from an artifact of the same run.
   build-context-artifact:
     runs-on: ubuntu-latest
@@ -342,7 +375,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, security-clean, security-clean-node, security-planted, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, security-clean, security-clean-node, security-planted, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
