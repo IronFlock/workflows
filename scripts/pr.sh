@@ -71,6 +71,16 @@ release_title() {
   [[ "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" == "release "* ]]
 }
 
+# Auto-merge waits for the required checks only where a ruleset demands them;
+# without any, GitHub merges at once, untested. So both commands refuse.
+require_checks() {
+  local n
+  n=$(gh api 'repos/{owner}/{repo}/rules/branches/main' \
+    --jq '[.[] | select(.type == "required_status_checks")] | length')
+  [ "${n:-0}" -gt 0 ] ||
+    die "main has no required checks: auto-merge would merge untested. Protect main first (a ruleset requiring ci-ok and security / report)."
+}
+
 open_pr() { # open_pr <branch>: number of the branch's open pull request, if any
   gh pr list --head "$1" --state open --json number --jq '.[0].number // empty'
 }
@@ -109,6 +119,7 @@ cmd_merge() {
     die "merge: run on a feature branch"
   fi
   require_clean
+  require_checks
   git fetch --quiet origin main
   git merge-base --is-ancestor origin/main HEAD ||
     die "merge: $branch does not contain origin/main (git rebase origin/main)"
@@ -138,6 +149,7 @@ cmd_release() {
   shift 4
   local base next tag title branch pr sha run
   require_clean
+  require_checks
   git fetch --quiet origin main
   branch=$(git rev-parse --abbrev-ref HEAD)
   if [ "$branch" = main ]; then
