@@ -99,14 +99,17 @@ await_merge() { # await_merge <branch>: waits up to 40 minutes
   die "the pull request of $1 is not merged after 40 minutes: gh pr checks $1"
 }
 
-# Back on main after the merge; in a worktree main is checked out elsewhere,
-# so this continues detached on origin/main.
+# Back on main after the merge, when the local main can simply follow
+# origin/main. Otherwise (main is checked out in another worktree, or holds
+# commits origin/main lacks) this continues detached on origin/main and leaves
+# the local main as it is.
 leave_branch() {
   git fetch --quiet origin main
-  if git switch --quiet main 2>/dev/null; then
-    git pull --quiet --ff-only
+  if git merge-base --is-ancestor main origin/main 2>/dev/null && git switch --quiet main 2>/dev/null; then
+    git merge --quiet --ff-only origin/main
   else
     git switch --quiet --detach origin/main
+    echo "==> continuing detached on origin/main; the local main is left as it is"
   fi
   git branch -D "$1" >/dev/null 2>&1 || true
 }

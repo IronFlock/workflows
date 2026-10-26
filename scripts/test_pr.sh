@@ -202,6 +202,16 @@ git -C "$repo" commit -q --allow-empty -m "local only"
 check "release: refused on a main ahead of origin" 1 release patch x VERSION release.yml VERSION
 
 setup VERSION 1.2.3
+ci_tag v1.2.4
+git -C "$repo" switch -q main
+git -C "$repo" commit -q --allow-empty -m "unpushed work on the local main"
+local_main=$(git -C "$repo" rev-parse main)
+git -C "$repo" switch -q feat
+check "release: a local main with unpushed commits does not stop it" 0 release patch x VERSION release.yml VERSION
+expect "release: the local main is left as it was" test "$(git -C "$repo" rev-parse main)" = "$local_main"
+expect "release: continues detached on origin/main" test "$(git -C "$repo" rev-parse --abbrev-ref HEAD)" = HEAD
+
+setup VERSION 1.2.3
 ci_tag v2.0.0
 check "release: major" 0 release major x VERSION release.yml VERSION
 expect "release: 2.0.0" test "$(git -C "$origin" show feat:VERSION)" = 2.0.0
