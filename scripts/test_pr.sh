@@ -29,6 +29,7 @@ case "$1 $2" in
       *) echo MERGED ;;
     esac ;;
   "run list") echo 42 ;;
+  "api repos/{owner}/{repo}/rules/branches/main") cat "$STUB/checks" 2>/dev/null || echo 2 ;;
   "run watch") exit "$(cat "$STUB/watch" 2>/dev/null || echo 0)" ;;
 esac
 EOF
@@ -130,6 +131,13 @@ git -C "$repo" commit -q -m "a repository without a version"
 # stdin holds a version: read as a file name, '-' would compare it with main's.
 check "merge: '-' for a repository without a version file" 0 merge - <<<"9.9.9"
 expect "merge: '-' still opens the pull request" logged "gh pr create --base main --head feat"
+
+setup VERSION 1.2.3
+echo 0 >"$STUB/checks"
+check "merge: refused when main has no required checks" 1 merge VERSION
+check "release: refused when main has no required checks" 1 release patch x VERSION release.yml VERSION
+expect "no required checks: nothing pushed, no pull request" not_logged "gh pr create"
+expect "no required checks: the branch stays local" test -z "$(git -C "$origin" branch --list feat)"
 
 setup VERSION 1.2.3
 git -C "$repo" switch -q main
