@@ -10,7 +10,8 @@
 #
 #   release.sh intent
 #       the release intent of a pull request into main. Env: VERSION_FILE,
-#       TAG_PREFIX, BASE_SHA, HEAD_SHA, TITLE. The version file decides:
+#       TAG_PREFIX, BASE_SHA, HEAD_SHA, TITLE, RELEASE_NAME (optional: one of
+#       several release projects in the repository). The version file decides:
 #         release      the version rises; the title is `release <name> <tag>`
 #                      (just release-patch|minor|major)
 #         no-release   the version is unchanged (just merge); any title except
@@ -72,6 +73,25 @@ intent() {
   head=$(version "$VERSION_FILE" "$HEAD_SHA")
   [ -n "$head" ] || { echo "::error::$VERSION_FILE has no version at $HEAD_SHA"; return 1; }
 
+  # Several release projects in one repository (RELEASE_NAME set per project):
+  # a release title that names another project is a no-release for this one,
+  # whose version must then stay as it is (one release per pull request).
+  local lower named=""
+  # shellcheck disable=SC2153 # TITLE comes from the environment (see the header)
+  lower=$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]')
+  if [ -n "${RELEASE_NAME:-}" ] && [[ "$lower" =~ ^release\ ([^\ ]+)\  ]]; then
+    named=${BASH_REMATCH[1]}
+  fi
+  if [ -n "$named" ] && [ "$named" != "$RELEASE_NAME" ]; then
+    if [ "$head" != "$base" ]; then
+      echo "::error::$VERSION_FILE changes ($base -> $head), but the pull request releases $named: one release per pull request"
+      return 1
+    fi
+    echo "a release of $named: $RELEASE_NAME releases nothing"
+    out kind=no-release
+    return 0
+  fi
+
   if [ "$head" = "$base" ]; then
     # The squash merge carries this title, and release.yml starts on a merge
     # whose message starts with 'release ' (GitHub compares case-insensitively).
@@ -120,12 +140,16 @@ mode() {
     # The squash merge of a release pull request: `release <name> <tag> (#n)`.
     title=$(head -n1 <<<"$COMMIT_TITLE")
     title=${title% (#*)}
-    if ! [[ "$title" =~ ^release\ [^\ ]+\ (.+)$ ]]; then
+    if ! [[ "$title" =~ ^release\ ([^\ ]+)\ (.+)$ ]]; then
       echo "::error::'$title' is not the merge of a release pull request: nothing to release"
       return 1
     fi
-    if [ "${BASH_REMATCH[1]}" != "$tag" ]; then
-      echo "::error::the merged release pull request names ${BASH_REMATCH[1]}, but $VERSION_FILE holds $tag"
+    if [ -n "${RELEASE_NAME:-}" ] && [ "${BASH_REMATCH[1]}" != "$RELEASE_NAME" ]; then
+      echo "::error::'$title' releases ${BASH_REMATCH[1]}, not $RELEASE_NAME"
+      return 1
+    fi
+    if [ "${BASH_REMATCH[2]}" != "$tag" ]; then
+      echo "::error::the merged release pull request names ${BASH_REMATCH[2]}, but $VERSION_FILE holds $tag"
       return 1
     fi
     if git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null; then

@@ -169,6 +169,14 @@ the files a bump changes, and writes the version in `_write-version`; copy
   `release/v<x>`. It then waits for the merge and for the release run, and
   ends back on `main` (detached on `origin/main` in a worktree).
 
+A repository with several release projects (each its own version file, tag
+prefix and release workflow, e.g. `db-v*` and `migrator-v*`): each project's
+`release-intent` call gets its `release-name`, so a release pull request of
+one project is a no-release for the others (and may not change their
+versions); `pr.sh release` takes `TAG_PREFIX` and `WRITE_VERSION` (the
+project's version recipe) from the environment, and `pr.sh merge` a
+comma-separated list of every version file. One release per pull request.
+
 Onboarding a repository onto this flow, besides the caller files:
 
 - `main` ruleset: squash merges only; repository setting "default commit

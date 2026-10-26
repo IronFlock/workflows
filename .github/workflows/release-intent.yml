@@ -21,6 +21,14 @@ on:
       tag-prefix:
         type: string
         default: v
+      release-name:
+        description: >-
+          This project's name, in a repository with several release projects
+          (each with its own version file and tag prefix): a release pull
+          request of another project is then a no-release for this one.
+          Empty = the repository's only project.
+        type: string
+        default: ""
       harness-ref:
         description: Ref of IronFlock/workflows the harness scripts are taken from.
         type: string
@@ -72,6 +80,7 @@ jobs:
         env:
           VERSION_FILE: ${{ inputs.version-file }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
+          RELEASE_NAME: ${{ inputs.release-name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TITLE: ${{ github.event.pull_request.title }}

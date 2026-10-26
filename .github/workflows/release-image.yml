@@ -53,6 +53,13 @@ on:
       tag-prefix:
         type: string
         default: v
+      image-tag-prefix:
+        description: >-
+          Prefix of the image tag when it differs from the git tag's (a
+          repository with several release projects: git tag db-v1.2.3, image
+          tag v1.2.3). Empty = tag-prefix.
+        type: string
+        default: ""
       dockerfile:
         type: string
         default: Dockerfile
@@ -62,7 +69,7 @@ on:
       build-args:
         description: >-
           Newline-separated KEY=VALUE build arguments; {tag} in a value becomes
-          the release tag (VERSION={tag} -> VERSION=v1.2.3; a dry run gets the
+          the image tag (VERSION={tag} -> VERSION=v1.2.3; a dry run gets the
           tag it would release).
         type: string
         default: ""
@@ -111,6 +118,9 @@ on:
         value: ${{ jobs.publish.outputs.digest }}
       tag:
         value: ${{ jobs.verify.outputs.tag }}
+      image-tag:
+        description: The image's tag (image-tag-prefix + version).
+        value: ${{ jobs.verify.outputs.image-tag }}
 
 # No workflow-level permissions: every job names its own (contents: read,
 # id-token: write), so a release pull request's dry run starts with read rights.
@@ -128,6 +138,7 @@ jobs:
       id-token: write
     outputs:
       tag: ${{ steps.version.outputs.tag }}
+      image-tag: ${{ steps.image.outputs.tag }}
       mode: ${{ steps.version.outputs.mode }}
       push: ${{ steps.version.outputs.push }}
       build: ${{ steps.registry.outputs.build || steps.version.outputs.build }}
@@ -201,6 +212,13 @@ jobs:
           service_account: ${{ inputs.service-account }}
           token_format: access_token
           access_token_lifetime: 300s
+      - name: the image tag
+        id: image
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          IMAGE_TAG_PREFIX: ${{ inputs.image-tag-prefix }}
+        run: echo "tag=${IMAGE_TAG_PREFIX:-$TAG_PREFIX}${TAG#"$TAG_PREFIX"}" >> "$GITHUB_OUTPUT"
       - name: the tag is not in the registry yet
         id: registry
         if: steps.version.outputs.push == 'true'
@@ -208,7 +226,7 @@ jobs:
           TOKEN: ${{ steps.auth.outputs.access_token }}
           REGISTRY: ${{ steps.version.outputs.registry }}
           IMAGE: ${{ inputs.image }}
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ steps.image.outputs.tag }}
           MODE: ${{ steps.version.outputs.mode }}
           SHA: ${{ github.sha }}
         run: |
@@ -275,7 +293,7 @@ jobs:
           BUILD_ARGS: ${{ inputs.build-args }}
           SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
           REVISION: ${{ github.sha }}
-          VERSION: ${{ needs.verify.outputs.tag }}
+          VERSION: ${{ needs.verify.outputs.image-tag }}
           ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
         run: |
           args=(--platform "$PLATFORM" -f "$DOCKERFILE"
@@ -339,13 +357,13 @@ jobs:
           service_account: ${{ inputs.service-account }}
           token_format: access_token
           access_token_lifetime: 600s
-      - name: multi-arch index ${{ needs.verify.outputs.tag }}
+      - name: multi-arch index ${{ needs.verify.outputs.image-tag }}
         id: index
         env:
           TOKEN: ${{ steps.auth.outputs.access_token }}
           REGISTRY: ${{ needs.verify.outputs.registry }}
           IMAGE: ${{ inputs.image }}
-          TAG: ${{ needs.verify.outputs.tag }}
+          TAG: ${{ needs.verify.outputs.image-tag }}
           LATEST: ${{ inputs.latest }}
           PLATFORMS: ${{ inputs.platforms }}
         run: |
