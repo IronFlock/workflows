@@ -59,6 +59,10 @@ jobs:
         with:
           persist-credentials: false
       - run: scripts/install-tool.sh shellcheck
+      - name: helm from tools.lock
+        run: |
+          scripts/install-tool.sh helm
+          "$RUNNER_TEMP/bin/helm" version --short | grep -q '^v3\.22\.0'
       - name: shellcheck
         run: shellcheck scripts/*.sh
       - name: sarif-summary unit tests
