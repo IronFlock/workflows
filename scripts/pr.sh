@@ -24,9 +24,10 @@
 #       required checks pass; its merge starts <workflow> (the image and the
 #       tag), and this waits for that run.
 #
-# Env: PR_WAIT_SECONDS (default 20) between polls. For one of several release
-# projects in a repository: TAG_PREFIX (default v; e.g. db-v) and
-# WRITE_VERSION (default _write-version; the project's recipe).
+# Env: PR_WAIT_SECONDS (default 20) between polls. TAG_PREFIX (default v when
+# unset; e.g. db-v for one of several release projects in a repository, empty
+# for bare-version tags) and WRITE_VERSION (default _write-version; the
+# project's recipe).
 set -euo pipefail
 
 wait_s=${PR_WAIT_SECONDS:-20}
@@ -170,7 +171,7 @@ cmd_release() {
   base=$(version "$vf" origin/main)
   [ -n "$base" ] || die "release: $vf has no version on origin/main"
   next=$(next_version "$level" "$base")
-  tag="${TAG_PREFIX:-v}$next"
+  tag="${TAG_PREFIX-v}$next"
   title="release $name $tag"
   if [ "$(version "$vf")" != "$next" ]; then
     just "${WRITE_VERSION:-_write-version}" "$next"

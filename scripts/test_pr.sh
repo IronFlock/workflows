@@ -258,6 +258,14 @@ unset TAG_PREFIX
 expect "release: title with the prefixed tag" logged "gh pr create --base main --head feat --title release platform-db db-v1.2.4"
 expect "release: the prefixed tag fetched" git -C "$repo" rev-parse --verify refs/tags/db-v1.2.4
 
+setup package.json 1.0.9
+ci_tag 1.0.10
+export TAG_PREFIX=
+check "release: an empty TAG_PREFIX tags the bare version" 0 release patch widget-label package.json build-publish.yml package.json
+unset TAG_PREFIX
+expect "release: title with the bare version" logged "gh pr create --base main --head feat --title release widget-label 1.0.10"
+expect "release: the bare tag fetched" git -C "$repo" rev-parse --verify refs/tags/1.0.10
+
 setup VERSION 1.2.3
 ci_tag v1.2.4
 export WRITE_VERSION=_write-db-version
