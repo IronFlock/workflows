@@ -177,6 +177,9 @@ versions); `pr.sh release` takes `TAG_PREFIX` and `WRITE_VERSION` (the
 project's version recipe) from the environment, and `pr.sh merge` a
 comma-separated list of every version file. One release per pull request.
 
+Bare-version tags (`1.0.10`, the widgets): an empty `TAG_PREFIX` for
+`pr.sh release` and `tag-prefix: ""` for `release-intent` and `release-tag`.
+
 Onboarding a repository onto this flow, besides the caller files:
 
 - `main` ruleset: squash merges only; repository setting "default commit
