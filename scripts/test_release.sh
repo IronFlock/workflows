@@ -97,6 +97,27 @@ for vf in VERSION package.json pyproject.toml; do
   check "$vf: 1.2.3 -> 1.10.0 is higher (version sort)" 0 intent "$r" "$vf" "$base" "$minor" "release x v1.10.0"
 done
 
+# Several release projects in one repository: RELEASE_NAME per project.
+intent_named() { # intent_named <dir> <file> <base> <head> <title> <name>
+  (cd "$1" && VERSION_FILE=$2 TAG_PREFIX=db-v BASE_SHA=$3 HEAD_SHA=$4 TITLE=$5 RELEASE_NAME=$6 "$script" intent)
+}
+r="$work/intent-named"
+repo "$r" VERSION 1.2.3
+base=$(git -C "$r" rev-parse HEAD)
+same=$(commit "$r" "docs")
+export GITHUB_OUTPUT="$work/out-named"
+: > "$GITHUB_OUTPUT"
+check "named: another project's release is a no-release here" 0 intent_named "$r" VERSION "$base" "$same" "release platform-db-migrator migrator-v0.3.36" platform-db
+expect_output "named: another project's release: kind no-release" "kind=no-release"
+unset GITHUB_OUTPUT
+check "named: this project's title without a bump" 1 intent_named "$r" VERSION "$base" "$same" "release platform-db db-v1.2.3" platform-db
+git -C "$r" checkout -q "$base"
+setv "$r" VERSION 1.2.4
+bump=$(commit "$r" "bump")
+check "named: this project's release PR" 0 intent_named "$r" VERSION "$base" "$bump" "release platform-db db-v1.2.4" platform-db
+check "named: a bump under another project's release title" 1 intent_named "$r" VERSION "$base" "$bump" "release platform-db-migrator migrator-v0.3.36" platform-db
+check "named: the prefix of this project's tag is required" 1 intent_named "$r" VERSION "$base" "$bump" "release platform-db v1.2.4" platform-db
+
 mode() { # mode <dir> <event> <ref> <ref type> <ref name> <commit title>
   (cd "$1" && VERSION_FILE=VERSION TAG_PREFIX=v EVENT=$2 REF=$3 REF_TYPE=$4 REF_NAME=$5 \
     RELEASE_BRANCH=main COMMIT_TITLE=$6 SHA=$(git rev-parse HEAD) "$script" mode)
@@ -113,6 +134,11 @@ expect_output "merge of a release PR: tag" "tag=v2.0.0"
 check "merge title with the PR body below" 0 mode "$r" push refs/heads/main branch main $'release x v2.0.0 (#12)\n\nbody'
 check "merge of a no-release PR is refused" 1 mode "$r" push refs/heads/main branch main "docs: typo (#13)"
 check "merge naming another version is refused" 1 mode "$r" push refs/heads/main branch main "release x v1.9.0 (#14)"
+check "merge of a release PR: any name without RELEASE_NAME" 0 mode "$r" push refs/heads/main branch main "release y v2.0.0 (#12)"
+named_mode() { (cd "$r" && VERSION_FILE=VERSION TAG_PREFIX=v EVENT=push REF=refs/heads/main REF_TYPE=branch REF_NAME=main \
+    RELEASE_BRANCH=main COMMIT_TITLE=$1 SHA=$(git rev-parse HEAD) RELEASE_NAME=x "$script" mode); }
+check "merge of another project's release PR is refused with RELEASE_NAME" 1 named_mode "release y v2.0.0 (#12)"
+check "merge of this project's release PR with RELEASE_NAME" 0 named_mode "release x v2.0.0 (#12)"
 git -C "$r" tag -a v2.0.0 -m "release x v2.0.0"
 : > "$GITHUB_OUTPUT"
 check "a re-run after a complete release passes" 0 mode "$r" push refs/heads/main branch main "release x v2.0.0 (#12)"

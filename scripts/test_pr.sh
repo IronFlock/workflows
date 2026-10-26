@@ -38,7 +38,7 @@ EOF
 cat >"$work/bin/just" <<'EOF'
 #!/usr/bin/env bash
 echo "just $*" >>"$STUB/log"
-[ "$1" = _write-version ] || exit 1
+case "$1" in _write-*) ;; *) exit 1 ;; esac
 vf=$(cat "$STUB/vf")
 if [ "$(basename "$vf")" = package.json ]; then
   jq --arg v "$2" '.version = $v' "$vf" >"$vf.tmp" && mv "$vf.tmp" "$vf"
@@ -238,6 +238,32 @@ ci_tag v1.10.1
 check "release: pyproject.toml" 0 release patch x pyproject.toml release.yml pyproject.toml
 expect "release: [project] version at 1.10.1" grep -qx 'version = "1.10.1"' <(git -C "$origin" show feat:pyproject.toml)
 expect "release: other tables untouched" grep -qx 'version = "9.9.9"' <(git -C "$origin" show feat:pyproject.toml)
+
+# Several release projects in one repository.
+setup VERSION 1.2.3
+mkdir -p "$repo/migrator" && echo 0.3.5 >"$repo/migrator/VERSION"
+git -C "$repo" add -A && git -C "$repo" commit -q -m "a second project"
+git -C "$repo" push -q origin feat
+git -C "$repo" switch -q main && git -C "$repo" merge -q --ff-only feat && git -C "$repo" push -q origin main && git -C "$repo" switch -q feat
+echo "change" >>"$repo/work.txt" && git -C "$repo" commit -q -am "more work"
+check "merge: several version files, none changed" 0 merge VERSION,migrator/VERSION
+echo 0.3.6 >"$repo/migrator/VERSION" && git -C "$repo" commit -q -am "bump the second project by hand"
+check "merge: refused when the second version file changes" 1 merge VERSION,migrator/VERSION
+
+setup VERSION 1.2.3
+ci_tag db-v1.2.4
+export TAG_PREFIX=db-v
+check "release: TAG_PREFIX names the tag" 0 release patch platform-db VERSION release-db.yml VERSION
+unset TAG_PREFIX
+expect "release: title with the prefixed tag" logged "gh pr create --base main --head feat --title release platform-db db-v1.2.4"
+expect "release: the prefixed tag fetched" git -C "$repo" rev-parse --verify refs/tags/db-v1.2.4
+
+setup VERSION 1.2.3
+ci_tag v1.2.4
+export WRITE_VERSION=_write-db-version
+check "release: WRITE_VERSION names the project's recipe" 0 release patch x VERSION release.yml VERSION
+unset WRITE_VERSION
+expect "release: the project's recipe was called" logged "just _write-db-version 1.2.4"
 
 [ "$fail" = 0 ] && echo "all pr.sh tests passed"
 exit "$fail"

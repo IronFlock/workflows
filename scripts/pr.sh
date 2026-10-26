@@ -5,13 +5,14 @@
 # script at IronFlock/workflows@v1 and runs it, so the flow is the same
 # everywhere (see "Pull requests from a laptop" in the README).
 #
-#   pr.sh merge <version-file|-> [<title>]
+#   pr.sh merge <version-file[,version-file...]|-> [<title>]
 #       a no-release pull request from the current feature branch (pushed even
 #       if origin does not have it yet), titled <title> (default: the subject
 #       of the branch's first commit), merged automatically (squash) once the
-#       required checks pass. The version must equal main's (`-`: a repository
-#       without a version, whose main is the publication), and the title must
-#       not start with "release ": such a merge releases nothing.
+#       required checks pass. Every version must equal main's (several
+#       comma-separated files: a repository with several release projects; `-`:
+#       a repository without a version, whose main is the publication), and the
+#       title must not start with "release ": such a merge releases nothing.
 #
 #   pr.sh release <patch|minor|major> <name> <version-file> <workflow> <file>...
 #       a release pull request. The next version is computed from the version
@@ -23,7 +24,9 @@
 #       required checks pass; its merge starts <workflow> (the image and the
 #       tag), and this waits for that run.
 #
-# Env: PR_WAIT_SECONDS (default 20) between polls.
+# Env: PR_WAIT_SECONDS (default 20) between polls. For one of several release
+# projects in a repository: TAG_PREFIX (default v; e.g. db-v) and
+# WRITE_VERSION (default _write-version; the project's recipe).
 set -euo pipefail
 
 wait_s=${PR_WAIT_SECONDS:-20}
@@ -115,8 +118,8 @@ leave_branch() {
 }
 
 cmd_merge() {
-  [ $# -ge 1 ] || die "usage: pr.sh merge <version-file|-> [<title>]"
-  local vf=$1 title=${2:-} branch here there
+  [ $# -ge 1 ] || die "usage: pr.sh merge <version-file[,version-file...]|-> [<title>]"
+  local vfs=$1 title=${2:-} branch here there vf
   branch=$(git rev-parse --abbrev-ref HEAD)
   if [ "$branch" = main ] || [ "$branch" = HEAD ]; then
     die "merge: run on a feature branch"
@@ -126,11 +129,13 @@ cmd_merge() {
   git fetch --quiet origin main
   git merge-base --is-ancestor origin/main HEAD ||
     die "merge: $branch does not contain origin/main (git rebase origin/main)"
-  if [ "$vf" != - ]; then
-    here=$(version "$vf")
-    there=$(version "$vf" origin/main)
-    [ "$here" = "$there" ] ||
-      die "merge: $branch changes the version ($there -> $here): that is a release (just release-patch)"
+  if [ "$vfs" != - ]; then
+    for vf in ${vfs//,/ }; do
+      here=$(version "$vf")
+      there=$(version "$vf" origin/main)
+      [ "$here" = "$there" ] ||
+        die "merge: $branch changes $vf ($there -> $here): that is a release (just release-patch)"
+    done
   fi
   [ -n "$title" ] || title=$(git log --reverse --format=%s origin/main..HEAD | head -n1)
   [ -n "$title" ] || die "merge: no commits on $branch beyond main"
@@ -165,11 +170,11 @@ cmd_release() {
   base=$(version "$vf" origin/main)
   [ -n "$base" ] || die "release: $vf has no version on origin/main"
   next=$(next_version "$level" "$base")
-  tag="v$next"
+  tag="${TAG_PREFIX:-v}$next"
   title="release $name $tag"
   if [ "$(version "$vf")" != "$next" ]; then
-    just _write-version "$next"
-    [ "$(version "$vf")" = "$next" ] || die "release: just _write-version $next left $vf at $(version "$vf")"
+    just "${WRITE_VERSION:-_write-version}" "$next"
+    [ "$(version "$vf")" = "$next" ] || die "release: just ${WRITE_VERSION:-_write-version} $next left $vf at $(version "$vf")"
   fi
   echo "==> $title (main has $base)"
 
