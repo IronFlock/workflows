@@ -21,8 +21,11 @@ _pr *args:
     set -euo pipefail
     script=$(mktemp)
     trap 'rm -f "$script"' EXIT
-    gh api -H 'Accept: application/vnd.github.raw' \
-        'repos/IronFlock/workflows/contents/scripts/pr.sh?ref=v1' > "$script"
+    if ! gh api -H 'Accept: application/vnd.github.raw' \
+        'repos/IronFlock/workflows/contents/scripts/pr.sh?ref=v1' > "$script"; then
+        echo "could not fetch pr.sh with gh (see above). An exported GH_TOKEN or GITHUB_TOKEN overrides gh's own login: unset it, check gh auth status, then run this again." >&2
+        exit 1
+    fi
     bash "$script" "$@"
 
 [positional-arguments]

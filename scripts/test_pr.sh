@@ -13,24 +13,51 @@ export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export PR_WAIT_SECONDS=0
 
-# gh: `pr list` prints the number in $STUB/pr (if any), `pr create` writes it,
-# `pr view` reports MERGED and the merge commit $STUB/sha, `run list` run 42,
-# `run watch` exits with $STUB/watch (default 0). Every call goes to $STUB/log.
+# gh: `pr list` prints the number in $STUB/pr (if any; with --state merged the
+# line in $STUB/merged), `pr create` writes it, `pr view` reports MERGED and the
+# merge commit $STUB/sha (after failing as often as $STUB/viewfail says, a
+# dropped connection), `run list` run 42, `run watch` exits with $STUB/watch
+# (default 0; on success it sets the tag "<repo> <tag>" in $STUB/watchtag, as
+# CI would), `run view` reports $STUB/runstate (default: what the watch said),
+# `api user` fails while $STUB/noauth exists. Every call goes to $STUB/log.
 mkdir -p "$work/bin"
 cat >"$work/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "gh $*" >>"$STUB/log"
 case "$1 $2" in
-  "pr list") cat "$STUB/pr" 2>/dev/null || true ;;
+  "pr list")
+    case "$*" in
+      *"--state merged"*) cat "$STUB/merged" 2>/dev/null || true ;;
+      *) cat "$STUB/pr" 2>/dev/null || true ;;
+    esac ;;
   "pr create") echo 7 >"$STUB/pr" ;;
   "pr view")
+    fails=$(cat "$STUB/viewfail" 2>/dev/null || echo 0)
+    if [ "$fails" -gt 0 ]; then
+      echo $((fails - 1)) >"$STUB/viewfail"
+      echo 'Post "https://api.github.com/graphql": dial tcp: connect: connection refused' >&2
+      exit 1
+    fi
     case "$*" in
       *mergeCommit*) cat "$STUB/sha" ;;
       *) echo MERGED ;;
     esac ;;
   "run list") echo 42 ;;
   "api repos/{owner}/{repo}/rules/branches/main") cat "$STUB/checks" 2>/dev/null || echo 2 ;;
-  "run watch") exit "$(cat "$STUB/watch" 2>/dev/null || echo 0)" ;;
+  "api user")
+    if [ -f "$STUB/noauth" ]; then echo "HTTP 401: Bad credentials (https://api.github.com/user)" >&2; exit 1; fi
+    echo tester ;;
+  "run watch")
+    status=$(cat "$STUB/watch" 2>/dev/null || echo 0)
+    if [ "$status" = 0 ] && [ -f "$STUB/watchtag" ]; then
+      read -r repo tag <"$STUB/watchtag"
+      git -C "$repo" push -q origin "HEAD:refs/tags/$tag"
+    fi
+    exit "$status" ;;
+  "run view")
+    if [ -f "$STUB/runstate" ]; then cat "$STUB/runstate"
+    elif [ "$(cat "$STUB/watch" 2>/dev/null || echo 0)" = 0 ]; then echo "completed success"
+    else echo "completed failure"; fi ;;
 esac
 EOF
 # just: `_write-version <v>` writes the version file named in $STUB/vf (a
@@ -112,7 +139,19 @@ expect() { # expect <name> <command...>: the command succeeds
 logged() { grep -qF -- "$1" "$STUB/log"; }
 # shellcheck disable=SC2329 # called through expect
 not_logged() { ! grep -qF -- "$1" "$STUB/log"; }
+# shellcheck disable=SC2329 # called through expect
+said() { grep -qF -- "$1" "$work/out"; }
 subject() { git -C "$repo" log -1 --format=%s "$1"; }
+# squash_onto_main <subject>: what GitHub's squash merge of feat leaves on
+# origin/main; prints the merge commit. feat stays as it was.
+squash_onto_main() {
+  git -C "$repo" switch -q main
+  git -C "$repo" checkout -q feat -- .
+  git -C "$repo" commit -q -m "$1"
+  git -C "$repo" push -q origin main
+  git -C "$repo" rev-parse HEAD
+  git -C "$repo" switch -q feat
+}
 files_of() { git -C "$repo" show --name-only --format= "$1" | tr '\n' ' '; }
 
 # ---- merge
@@ -272,6 +311,120 @@ export WRITE_VERSION=_write-db-version
 check "release: WRITE_VERSION names the project's recipe" 0 release patch x VERSION release.yml VERSION
 unset WRITE_VERSION
 expect "release: the project's recipe was called" logged "just _write-db-version 1.2.4"
+
+# ---- wrong starts, said plainly
+setup VERSION 1.2.3
+touch "$STUB/noauth"
+check "release: refused when gh cannot use GitHub" 1 release patch x VERSION release.yml VERSION
+expect "release: says to check the gh login" said "gh auth status"
+expect "release: nothing pushed when gh cannot use GitHub" not_logged "gh pr create"
+GH_TOKEN=stale check "merge: an exported GH_TOKEN is named" 1 merge VERSION
+expect "merge: says to unset it" said "unset GH_TOKEN"
+
+setup VERSION 1.2.3
+git -C "$repo" switch -q main
+git -C "$repo" commit -q --allow-empty -m "on origin only"
+git -C "$repo" push -q origin main
+git -C "$repo" reset -q --hard HEAD~1
+check "release: refused on a main behind origin" 1 release patch x VERSION release.yml VERSION
+expect "release: says to pull" said "1 commit(s) behind origin/main"
+
+setup VERSION 1.2.3
+git -C "$repo" switch -q main
+git -C "$repo" commit -q --allow-empty -m "local only work"
+check "release: a main ahead of origin is explained" 1 release patch x VERSION release.yml VERSION
+expect "release: lists the local commits" said "local only work"
+expect "release: says how to move them onto a branch" said "git branch -f main origin/main"
+
+setup VERSION 1.2.3
+git -C "$repo" switch -q --detach main
+check "release: refused on a detached HEAD" 1 release patch x VERSION release.yml VERSION
+expect "release: says HEAD is detached" said "HEAD is detached"
+
+setup VERSION 1.2.3
+git -C "$repo" switch -q main
+echo c >>"$repo/work.txt"
+git -C "$repo" commit -q -am "someone else's fix"
+git -C "$repo" push -q origin main
+git -C "$repo" switch -q feat
+check "release: refused when the branch lacks origin/main" 1 release patch x VERSION release.yml VERSION
+expect "release: names the missing commits" said "someone else's fix"
+expect "release: says to rebase" said "git rebase origin/main"
+
+# ---- a run whose wait broke off, run again
+setup VERSION 1.2.3
+echo 1.2.4 >"$repo/VERSION"
+git -C "$repo" commit -q -am "release x v1.2.4"
+head=$(git -C "$repo" rev-parse HEAD)
+sha=$(squash_onto_main "release x v1.2.4 (#7)")
+echo "7 $head $sha release x v1.2.4" >"$STUB/merged"
+ci_tag v1.2.4
+check "release again: the merged release is not released twice" 0 release patch x VERSION release.yml VERSION
+expect "release again: says it is published already" said "published and tagged already"
+expect "release again: no pull request, no bump" not_logged "gh pr create"
+expect "release again: no _write-version" not_logged "just _write-version"
+expect "release again: back on main" test "$(git -C "$repo" rev-parse --abbrev-ref HEAD)" = main
+expect "release again: the merged branch is gone" test -z "$(git -C "$repo" branch --list feat)"
+
+setup VERSION 1.2.3
+echo 1.2.4 >"$repo/VERSION"
+git -C "$repo" commit -q -am "release x v1.2.4"
+head=$(git -C "$repo" rev-parse HEAD)
+sha=$(squash_onto_main "release x v1.2.4 (#7)")
+echo "7 $head $sha release x v1.2.4" >"$STUB/merged"
+echo "$repo v1.2.4" >"$STUB/watchtag"
+check "release again: follows the release run still going" 0 release patch x VERSION release.yml VERSION
+expect "release again: looks the run up on the merge commit" logged "gh run list --workflow release.yml --commit $sha"
+expect "release again: watches it" logged "gh run watch 42 --exit-status"
+expect "release again: the tag fetched" git -C "$repo" rev-parse --verify refs/tags/v1.2.4
+expect "release again: still no pull request" not_logged "gh pr create"
+
+setup VERSION 1.2.3
+head=$(git -C "$repo" rev-parse HEAD)
+sha=$(squash_onto_main "fix the widget (#39)")
+echo "39 $head $sha fix the widget" >"$STUB/merged"
+ci_tag v1.2.4
+check "release: a branch merged without a release releases main" 0 release patch x VERSION release.yml VERSION
+expect "release: says main is released instead" said "releasing main, which holds it"
+expect "release: the release branch comes from main" logged "gh pr create --base main --head release/v1.2.4 --title release x v1.2.4"
+expect "release: the merged branch is gone" test -z "$(git -C "$repo" branch --list feat)"
+
+setup VERSION 1.2.3
+head=$(git -C "$repo" rev-parse HEAD)
+sha=$(squash_onto_main "fix the widget (#39)")
+echo "39 $head $sha fix the widget" >"$STUB/merged"
+echo d >>"$repo/work.txt"
+git -C "$repo" commit -q -am "after the merge"
+check "release: a merged branch with commits since is refused" 1 release patch x VERSION release.yml VERSION
+expect "release: says to rebase them" said "has commits since"
+expect "release: the branch stays" test -n "$(git -C "$repo" branch --list feat)"
+expect "release: nothing pushed" not_logged "gh pr create"
+
+setup VERSION 1.2.3
+head=$(git -C "$repo" rev-parse HEAD)
+sha=$(squash_onto_main "fix the widget (#39)")
+echo "39 $head $sha fix the widget" >"$STUB/merged"
+check "merge again: a merged branch has nothing to do" 0 merge VERSION
+expect "merge again: says so" said "merged already, as #39"
+expect "merge again: back on main" test "$(git -C "$repo" rev-parse --abbrev-ref HEAD)" = main
+
+# ---- a dropped connection
+setup VERSION 1.2.3
+ci_tag v1.2.4
+echo 3 >"$STUB/viewfail"
+check "release: a few dropped polls do not end the wait" 0 release patch x VERSION release.yml VERSION
+expect "release: still published" said "v1.2.4 published and tagged by CI"
+
+setup VERSION 1.2.3
+echo 99 >"$STUB/viewfail"
+check "release: a lasting outage ends the wait, saying how to go on" 1 release patch x VERSION release.yml VERSION
+expect "release: says to run it again" said "run this again to follow it"
+
+setup VERSION 1.2.3
+ci_tag v1.2.4
+echo 1 >"$STUB/watch"
+echo "completed success" >"$STUB/runstate"
+check "release: a dropped watch of a run that succeeded is a success" 0 release patch x VERSION release.yml VERSION
 
 [ "$fail" = 0 ] && echo "all pr.sh tests passed"
 exit "$fail"
