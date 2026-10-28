@@ -232,10 +232,13 @@ The summary lists exceptions that expire within 30 days.
   repository when `v1` moves. The harness has the same recipes as every
   repository ([Justfile](Justfile)): `just merge [TITLE]` opens the pull
   request from a feature branch (merged once the self-test is green; that
-  publishes nothing). `just release-patch` (`-minor`) on the up-to-date
-  `main` then publishes it ([scripts/publish.sh](scripts/publish.sh)): only
-  the merge commit of a pull request whose checks are green, tagged with the
-  next `v1.x.y`, and `v1` moved there. It asks first, and prints the rollback
+  publishes nothing). `just release-patch` (`-minor`) publishes
+  ([scripts/publish.sh](scripts/publish.sh)), like a release in every
+  repository: on a feature branch it opens the pull request, waits for the
+  self-test and the merge, and publishes that merge commit; on an up-to-date
+  `main` it publishes the newest merge. Only the merge commit of a pull
+  request whose checks are green, tagged with the next `v1.x.y`, and `v1`
+  moved there. It asks first, and prints the rollback
   (`git tag -f v1 <previous> && git push -f origin v1`). A breaking input
   change is `just release-major`: `v2.0.0` and a new `v2`, while `v1` stays
   until every caller says `@v2`. A new input that callers will pass: publish

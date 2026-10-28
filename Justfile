@@ -3,8 +3,10 @@
 # harness"):
 #   just merge [TITLE]   a pull request from this feature branch, merged once
 #                        the self-test is green; it publishes nothing
-#   just release-patch   publishes main: the next v1.x.y on its merge commit,
-#                        and v1 moved there (-minor; -major starts v2)
+#   just release-patch   from a feature branch: its pull request, then, once
+#                        merged, the merge commit published (on main: the
+#                        newest merge): the next v1.x.y, and v1 moved there
+#                        (-minor; -major starts v2)
 
 # Show the recipes
 default:
@@ -17,11 +19,11 @@ default:
 merge TITLE="":
     bash scripts/pr.sh merge - "$1"
 
-# Publish main: v1.x.y on the merge commit, and v1 moved there
+# Publish: v1.x.y on the merge commit, v1 moved there (a feature branch: its pull request first)
 release-patch:
     bash scripts/publish.sh patch
 
-# Publish main: v1.x.0 (new inputs or behaviour callers can use), v1 moved
+# Publish as v1.x.0 (new inputs or behaviour callers can use), v1 moved there
 release-minor:
     bash scripts/publish.sh minor
 
