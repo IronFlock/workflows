@@ -168,6 +168,15 @@ the files a bump changes, and writes the version in `_write-version`; copy
   top of the branch's work; on an up-to-date `main` it goes on a new branch
   `release/v<x>`. It then waits for the merge and for the release run, and
   ends back on `main` (detached on `origin/main` in a worktree).
+- Run either again when a run broke off (a dropped connection, Ctrl-C): a
+  branch whose pull request is merged already is left for `main`; a release
+  then follows the release run of the merged release pull request instead of
+  releasing twice, or releases `main` when the branch was merged without a
+  release. Polls survive short outages. A start that cannot work is refused
+  with what to do: `gh` not logged in (an exported `GH_TOKEN` or
+  `GITHUB_TOKEN` overrides its login), `main` behind or ahead of
+  `origin/main`, a detached `HEAD`, a branch missing commits of
+  `origin/main`.
 
 A repository with several release projects (each its own version file, tag
 prefix and release workflow, e.g. `db-v*` and `migrator-v*`): each project's

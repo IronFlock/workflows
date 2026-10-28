@@ -24,6 +24,15 @@
 #       required checks pass; its merge starts <workflow> (the image and the
 #       tag), and this waits for that run.
 #
+# Running either again after a run whose wait broke off (a dropped connection,
+# Ctrl-C) is safe: a branch whose pull request is merged already (squash) is
+# left for main, and a release follows the release run of its merged release
+# pull request instead of releasing again, or releases main when the branch
+# was merged without a release. Polls survive short outages. Every start that
+# cannot work (gh not logged in, main behind or ahead of origin/main, a
+# detached HEAD, a branch missing commits of origin/main) is refused, saying
+# what to do.
+#
 # Env: PR_WAIT_SECONDS (default 20) between polls. TAG_PREFIX (default v when
 # unset; e.g. db-v for one of several release projects in a repository, empty
 # for bare-version tags) and WRITE_VERSION (default _write-version; the
@@ -33,6 +42,81 @@ set -euo pipefail
 wait_s=${PR_WAIT_SECONDS:-20}
 
 die() { echo "$*" >&2; exit 1; }
+
+# gh, retried: from a laptop the connection to GitHub drops now and then
+# ("connection refused"), which must not end a run that only waits. Prints the
+# output of the first attempt that succeeds; fails after five.
+gh_retry() {
+  local attempt out
+  for attempt in 1 2 3 4 5; do
+    if out=$(gh "$@" 2>/dev/null); then
+      printf '%s\n' "$out"
+      return 0
+    fi
+    [ "$attempt" = 5 ] || sleep "$wait_s"
+  done
+  return 1
+}
+
+# gh must act as the person running this. An exported GH_TOKEN or GITHUB_TOKEN
+# takes precedence over gh's own login, and a stale one fails every call (401).
+require_gh() {
+  local err exported=""
+  err=$(gh api user --jq .login 2>&1 >/dev/null) && return 0
+  [ -z "${GH_TOKEN:-}" ] || exported+=" GH_TOKEN"
+  [ -z "${GITHUB_TOKEN:-}" ] || exported+=" GITHUB_TOKEN"
+  if [ -n "$exported" ]; then
+    die "gh cannot use GitHub: ${err:-no answer}
+This shell exports$exported, which gh uses instead of its own login. Run: unset$exported; gh auth status; then this again."
+  fi
+  die "gh cannot use GitHub: ${err:-no answer}
+Check gh auth status (gh auth login renews an expired login), then run this again."
+}
+
+# A release starts from main only when it is origin/main exactly.
+check_main() { # check_main <level>
+  local behind ahead
+  read -r behind ahead < <(git rev-list --left-right --count origin/main...main)
+  if [ "$behind" = 0 ] && [ "$ahead" = 0 ]; then return 0; fi
+  [ "$ahead" != 0 ] ||
+    die "release: main is $behind commit(s) behind origin/main. Run: git pull --ff-only; then this again."
+  die "release: main has $ahead commit(s) that origin/main lacks:
+$(git log --format='  %h %s' origin/main..main | head -n 5)
+main is protected: they reach it only through a pull request. Move them onto a branch, put main back on origin/main, and release from the branch:
+  git switch -c <topic>
+  git branch -f main origin/main
+  just release-$1"
+}
+
+# The current branch misses commits of origin/main: which, and how to take them.
+lacks_main() { # lacks_main <command> <branch>
+  die "$1: origin/main has $(git rev-list --count HEAD..origin/main) commit(s) that $2 lacks:
+$(git log --format='  %h %s' HEAD..origin/main | head -n 5)
+Run: git rebase origin/main (or git merge origin/main); then this again."
+}
+
+# merged_pr <branch>: "<number> <head commit> <merge commit> <title>" of the
+# branch's merged pull request, if it has one.
+merged_pr() {
+  gh_retry pr list --head "$1" --state merged --limit 1 \
+    --json number,title,headRefOid,mergeCommit \
+    --jq '.[0] // empty | "\(.number) \(.headRefOid) \(.mergeCommit.oid) \(.title)"'
+}
+
+# The current branch lacks origin/main. Usually its pull request was merged
+# (squash) already, by a run whose wait broke off: then this leaves the branch
+# for main, when nothing on it is newer than that pull request, and prints
+# "<number> <merge commit> <title>". Dies in every other case, saying why.
+merged_branch() { # merged_branch <command> <branch>
+  local info pr head sha title
+  info=$(merged_pr "$2") || die "$1: cannot ask GitHub for the pull requests of $2 (gh pr list failed); run this again"
+  [ -n "$info" ] || lacks_main "$1" "$2"
+  read -r pr head sha title <<<"$info"
+  [ "$(git rev-parse HEAD)" = "$head" ] ||
+    die "$1: $2 was merged as #$pr ($title) and has commits since. Run: git rebase origin/main; then this again."
+  leave_branch "$2" >&2
+  echo "$pr $sha $title"
+}
 
 # version <file> [<rev>]: a package.json's `version`, a pyproject.toml's
 # `[project] version`, otherwise the content without whitespace (same rule as
@@ -90,17 +174,52 @@ open_pr() { # open_pr <branch>: number of the branch's open pull request, if any
 }
 
 await_merge() { # await_merge <branch>: waits up to 40 minutes
-  local state=""
+  local state="" misses=0
   echo "==> waiting for the required checks and the merge of $1"
   for _ in $(seq 1 120); do
-    state=$(gh pr view "$1" --json state --jq .state)
-    case "$state" in
-      MERGED) return 0 ;;
-      CLOSED) die "the pull request of $1 was closed without merging" ;;
-    esac
+    if state=$(gh pr view "$1" --json state --jq .state 2>/dev/null); then
+      misses=0
+      case "$state" in
+        MERGED) return 0 ;;
+        CLOSED) die "the pull request of $1 was closed without merging" ;;
+      esac
+    else
+      misses=$((misses + 1))
+      [ "$misses" -lt 10 ] ||
+        die "lost the connection to GitHub while waiting for the merge of $1. The pull request still merges by itself, and its merge releases: run this again to follow it."
+    fi
     sleep "$wait_s"
   done
   die "the pull request of $1 is not merged after 40 minutes: gh pr checks $1"
+}
+
+# Waits for the release run of <tag>, which the merge commit <sha> started, and
+# fetches the tag.
+await_release() { # await_release <workflow> <sha> <tag>
+  local workflow=$1 sha=$2 tag=$3 run="" state tries=0
+  echo "==> waiting for the release run of $tag ($workflow on $sha)"
+  for _ in $(seq 1 30); do
+    run=$(gh_retry run list --workflow "$workflow" --commit "$sha" --json databaseId,event \
+      --jq 'map(select(.event == "push")) | .[0].databaseId // empty') || run=""
+    [ -n "$run" ] && break
+    sleep 5
+  done
+  [ -n "$run" ] || die "no run of $workflow started for $sha: check GitHub Actions"
+  # A failed watch is a failed run or a dropped connection: the run says which.
+  until gh run watch "$run" --exit-status --interval "$wait_s" >/dev/null 2>&1; do
+    state=$(gh_retry run view "$run" --json status,conclusion --jq '"\(.status) \(.conclusion)"') ||
+      die "lost the connection to GitHub while the release run $run of $tag was running; it carries on in CI: gh run watch $run, or run this again"
+    case "$state" in
+      "completed success") break ;;
+      completed*) die "the release run $run of $tag failed (${state#completed }): gh run view $run --log-failed (a re-run is safe)" ;;
+    esac
+    tries=$((tries + 1))
+    [ "$tries" -lt 10 ] ||
+      die "the connection to GitHub keeps dropping while the release run $run of $tag runs; it carries on in CI: gh run watch $run"
+    sleep "$wait_s"
+  done
+  git fetch --quiet origin tag "$tag"
+  echo "==> $tag published and tagged by CI (run $run)"
 }
 
 # Back on main after the merge, when the local main can simply follow
@@ -121,15 +240,21 @@ leave_branch() {
 cmd_merge() {
   [ $# -ge 1 ] || die "usage: pr.sh merge <version-file[,version-file...]|-> [<title>]"
   local vfs=$1 title=${2:-} branch here there vf
+  local merged pr sha mtitle
   branch=$(git rev-parse --abbrev-ref HEAD)
   if [ "$branch" = main ] || [ "$branch" = HEAD ]; then
     die "merge: run on a feature branch"
   fi
   require_clean
+  require_gh
   require_checks
   git fetch --quiet origin main
-  git merge-base --is-ancestor origin/main HEAD ||
-    die "merge: $branch does not contain origin/main (git rebase origin/main)"
+  if ! git merge-base --is-ancestor origin/main HEAD; then
+    merged=$(merged_branch merge "$branch")
+    read -r pr sha mtitle <<<"$merged"
+    echo "==> $branch is merged already, as #$pr ($mtitle): nothing to do; now on $(git rev-parse --abbrev-ref HEAD)"
+    return 0
+  fi
   if [ "$vfs" != - ]; then
     for vf in ${vfs//,/ }; do
       here=$(version "$vf")
@@ -156,16 +281,35 @@ cmd_release() {
   [ $# -ge 5 ] || die "usage: pr.sh release <patch|minor|major> <name> <version-file> <workflow> <file>..."
   local level=$1 name=$2 vf=$3 workflow=$4
   shift 4
-  local base next tag title branch pr sha run
+  local base next tag title branch pr sha merged mtitle
   require_clean
+  require_gh
   require_checks
   git fetch --quiet origin main
   branch=$(git rev-parse --abbrev-ref HEAD)
+  [ "$branch" != HEAD ] ||
+    die "release: HEAD is detached. A finished release leaves it so when the local main holds commits origin/main lacks (git log origin/main..main lists them). Switch to main or to your feature branch; then run this again."
   if [ "$branch" = main ]; then
-    [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] ||
-      die "release: main is not up to date (git pull --ff-only)"
-  elif [ "$branch" = HEAD ] || ! git merge-base --is-ancestor origin/main HEAD; then
-    die "release: run on main or on a branch that contains origin/main (git rebase origin/main)"
+    check_main "$level"
+  elif ! git merge-base --is-ancestor origin/main HEAD; then
+    # Merged already: a run whose wait broke off, or `just merge`.
+    merged=$(merged_branch release "$branch")
+    read -r pr sha mtitle <<<"$merged"
+    if [[ "$mtitle" == "release $name "* ]]; then
+      tag=${mtitle##* }
+      if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+        git fetch --quiet origin tag "$tag"
+        echo "==> #$pr ($mtitle) is merged, and $tag published and tagged already: nothing to do"
+        return 0
+      fi
+      echo "==> #$pr ($mtitle) is merged already: following its release, not releasing again"
+      await_release "$workflow" "$sha" "$tag"
+      return 0
+    fi
+    [ "$(git rev-parse --abbrev-ref HEAD)" = main ] ||
+      die "release: $branch was merged as #$pr ($mtitle) without a release, and the local main cannot follow origin/main (it holds commits origin/main lacks, or another worktree has it). Release from an up-to-date main."
+    echo "==> $branch was merged as #$pr ($mtitle) without a release: releasing main, which holds it"
+    branch=main
   fi
 
   base=$(version "$vf" origin/main)
@@ -201,22 +345,10 @@ cmd_release() {
   fi
   gh pr merge "$branch" --squash --auto --delete-branch
   await_merge "$branch"
-  sha=$(gh pr view "$branch" --json mergeCommit --jq '.mergeCommit.oid')
+  sha=$(gh_retry pr view "$branch" --json mergeCommit --jq '.mergeCommit.oid') ||
+    die "lost the connection to GitHub after the merge of $branch; it releases in CI: run this again to follow it"
   leave_branch "$branch"
-
-  echo "==> waiting for the release run of $tag ($workflow on $sha)"
-  run=""
-  for _ in $(seq 1 30); do
-    run=$(gh run list --workflow "$workflow" --commit "$sha" --json databaseId,event \
-      --jq 'map(select(.event == "push")) | .[0].databaseId // empty')
-    [ -n "$run" ] && break
-    sleep 5
-  done
-  [ -n "$run" ] || die "no run of $workflow started for $sha: check GitHub Actions"
-  gh run watch "$run" --exit-status --interval "$wait_s" >/dev/null ||
-    die "the release run $run of $tag failed: gh run view $run --log-failed (a re-run is safe)"
-  git fetch --quiet origin tag "$tag"
-  echo "==> $tag published and tagged by CI (run $run)"
+  await_release "$workflow" "$sha" "$tag"
 }
 
 case "${1:-}" in
