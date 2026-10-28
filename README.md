@@ -228,11 +228,21 @@ The summary lists exceptions that expire within 30 days.
   a failing test); the self-test is green only when each one is reported and
   the clean fixture passes with every `fail-on` category set. Alerts that
   GitHub raises for the fixtures are expected.
-- **Releases.** Callers use the moving tag `v1`. Move it only to the merge
-  commit of a pull request whose self-test was green (squash merge of an
-  up-to-date branch: the same tree):
-  `git tag -f v1 <sha> && git push -f origin v1`. Breaking input changes get
-  `v2`.
+- **Releases.** Callers use the moving tag `v1`, so a change reaches every
+  repository when `v1` moves. The harness has the same recipes as every
+  repository ([Justfile](Justfile)): `just merge [TITLE]` opens the pull
+  request from a feature branch (merged once the self-test is green; that
+  publishes nothing). `just release-patch` (`-minor`) on the up-to-date
+  `main` then publishes it ([scripts/publish.sh](scripts/publish.sh)): only
+  the merge commit of a pull request whose checks are green, tagged with the
+  next `v1.x.y`, and `v1` moved there. It asks first, and prints the rollback
+  (`git tag -f v1 <previous> && git push -f origin v1`). A breaking input
+  change is `just release-major`: `v2.0.0` and a new `v2`, while `v1` stays
+  until every caller says `@v2`. A new input that callers will pass: publish
+  first, then change the callers (a caller passing an input its `@v1` does
+  not know fails to start).
+- **Publish script.** `bash scripts/test_publish.sh` tests the refusals, the
+  versions and the moved tag against a local remote.
 - **Report script.** `python3 -I scripts/test_sarif_summary.py` tests the
   categories, `fail-on`, VEX expiry and the code-scanning copy.
 - **Release script.** `bash scripts/test_release.sh` tests the release intent,

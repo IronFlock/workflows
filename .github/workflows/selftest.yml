@@ -71,6 +71,8 @@ jobs:
         run: bash scripts/test_release.sh
       - name: pr.sh unit tests
         run: bash scripts/test_pr.sh
+      - name: publish.sh unit tests
+        run: bash scripts/test_publish.sh
       # Public repository: no internal document names or plan IDs.
       - name: public-repo hygiene
         run: |
