@@ -7,9 +7,10 @@
 
 `report` reads every *.sarif and licenses*.json below DIR, sorts each finding
 into one category, drops findings an OpenVEX statement marks not_affected or
-fixed, prints a Markdown summary (also appended to --summary) and writes
-`findings` (JSON counts) and `blocking` (count) to --output. It exits 1 when a
-category listed in --fail-on has findings, or when a scanner job failed.
+fixed and results suppressed in the source (`nosemgrep`), prints a Markdown
+summary (also appended to --summary) and writes `findings` (JSON counts) and
+`blocking` (count) to --output. It exits 1 when a category listed in --fail-on
+has findings, or when a scanner job failed.
 
 Categories: secrets, vuln-critical, vuln-high, vuln-other, misconfig-high,
 misconfig-other, license-forbidden, license-restricted, semgrep-error,
@@ -196,6 +197,10 @@ def collect(directory, vex):
         for run in doc.get("runs") or []:
             tool, rules, rule_list = rule_index(run)
             for result in run.get("results") or []:
+                # In-source suppressions (`nosemgrep`) stay in the SARIF; one
+                # without a status, or accepted, takes the result out.
+                if any((s or {}).get("status", "accepted") == "accepted" for s in result.get("suppressions") or []):
+                    continue
                 rule = rules.get(result.get("ruleId"))
                 if rule is None and isinstance(result.get("ruleIndex"), int) and result["ruleIndex"] < len(rule_list):
                     rule = rule_list[result["ruleIndex"]]

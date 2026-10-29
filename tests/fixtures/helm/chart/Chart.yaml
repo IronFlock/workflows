@@ -1,0 +1,8 @@
+apiVersion: v2
+name: planted
+description: Planted for the harness self-test. Never install this chart.
+version: 0.1.0
+dependencies:
+  - name: sub
+    version: 0.1.0
+    repository: file://../sub

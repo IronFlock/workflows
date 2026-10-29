@@ -1,0 +1,4 @@
+apiVersion: v2
+name: sub
+description: The dependency of the planted chart (no templates).
+version: 0.1.0

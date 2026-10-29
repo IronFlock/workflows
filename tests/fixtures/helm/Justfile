@@ -1,0 +1,6 @@
+# A chart whose dependency is not committed, like charts that pull their
+# dependencies from a Helm repository: `deps` fetches it, as a repository's
+# config-setup-recipe does before the configuration scan.
+
+deps:
+    helm dependency build chart
