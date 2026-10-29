@@ -1,0 +1,25 @@
+{{- /*
+Planted for the harness self-test: a privileged container. The file is not
+plain YAML, so only the rendered chart shows it, and trivy renders the chart
+only when its dependency is in charts/.
+*/}}
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-planted
+spec:
+  selector:
+    matchLabels:
+      app: planted
+  template:
+    metadata:
+      labels:
+        app: planted
+    spec:
+      containers:
+        - name: planted
+          image: alpine:3.12
+          securityContext:
+            privileged: true
+{{- end }}

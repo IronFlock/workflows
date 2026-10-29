@@ -1,0 +1,3 @@
+# Fetched by `just deps`, never committed: the self-test needs the chart
+# without it.
+/charts/

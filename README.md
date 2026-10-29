@@ -76,6 +76,13 @@ repository-local `integration` job next to the gate.
   vulnerable code is reachable.
 - A scanner job that fails or is cancelled (rather than finds something) always
   fails `report`: an incomplete scan is not a pass.
+- Helm charts are scanned rendered. trivy skips a chart it cannot load (a
+  dependency missing from `charts/`, a required value without a default) with
+  only a warning, subcharts included, so a skipped chart fails the `config` job.
+  A repository whose chart dependencies are not committed fetches them in
+  `config-setup-recipe` (run in `working-directory`, with the tools from
+  `tools.lock` listed in `config-tools`, e.g. `helm`); values a chart requires
+  go into `misconfiguration.helm.set` of a `trivy.yaml` in the repository root.
 - semgrep runs the IronFlock rules plus `semgrep-rulesets` (default `p/default`).
   Go repositories, whose `just lint` runs gosec, set `semgrep-rulesets: ""` so each
   finding is reported (and annotated) once.
@@ -212,6 +219,7 @@ request that adds it. Templates are in [templates/repo](templates/repo).
 | `.gitleaks.toml` | reviewed secret false positives | review with each change |
 | `.gitleaks-baseline.json` | historical findings that cannot be removed from history | — |
 | `// nosemgrep: <rule>` | a reviewed semgrep false positive, with the reason | — |
+| `semgrep-exclude-rules` (caller input) | a semgrep rule that cannot apply to the repository at all, with the reason next to it | review with each change |
 
 The summary lists exceptions that expire within 30 days.
 
@@ -225,8 +233,10 @@ The summary lists exceptions that expire within 30 days.
   pull request and weekly. The fixtures plant one finding per scanner (a fake key,
   a reachable call into a vulnerable `golang.org/x/text`, a secret written to
   the console, a root container on an outdated base image, an unpinned action,
-  a failing test); the self-test is green only when each one is reported and
-  the clean fixture passes with every `fail-on` category set. Alerts that
+  a failing test, a privileged container in a Helm chart whose dependency is
+  fetched first); the self-test is green only when each one is reported, the
+  same chart without its dependency fails the scan, and the clean fixture
+  passes with every `fail-on` category set. Alerts that
   GitHub raises for the fixtures are expected.
 - **Releases.** Callers use the moving tag `v1`, so a change reaches every
   repository when `v1` moves. The harness has the same recipes as every

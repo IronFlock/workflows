@@ -69,10 +69,29 @@ on:
           repositories whose lint runs gosec set "" to avoid duplicate findings.
         type: string
         default: p/default
+      semgrep-exclude-rules:
+        description: >-
+          Rule ids semgrep skips (space-separated), for a rule that cannot
+          apply to the repository at all (e.g. a JavaScript rule in a
+          repository without JavaScript); the caller gives the reason next to
+          it. A single false positive gets `nosemgrep` instead.
+        type: string
+        default: ""
       config-scan:
         description: trivy misconfiguration scan (Dockerfile, Kubernetes, Helm).
         type: boolean
         default: true
+      config-setup-recipe:
+        description: >-
+          Recipe run in working-directory before the configuration scan, e.g.
+          one that fetches Helm chart dependencies: trivy skips a chart whose
+          dependencies are missing from charts/, and the scan then fails.
+        type: string
+        default: ""
+      config-tools:
+        description: Tools from tools.lock that config-setup-recipe needs (space-separated), e.g. helm.
+        type: string
+        default: ""
       licenses:
         type: boolean
         default: true
@@ -306,9 +325,11 @@ jobs:
         env:
           SCAN_PATH: ${{ inputs.scan-path }}
           RULESETS: ${{ inputs.semgrep-rulesets }}
+          EXCLUDE_RULES: ${{ inputs.semgrep-exclude-rules }}
         run: |
           configs=(--config "$HARNESS/semgrep/ironflock.yml")
           for ruleset in $RULESETS; do configs+=(--config "$ruleset"); done
+          for rule in $EXCLUDE_RULES; do configs+=(--exclude-rule "$rule"); done
           semgrep scan --metrics=off --disable-version-check "${configs[@]}" \
             --sarif --output "$RUNNER_TEMP/findings/semgrep.sarif" "$SCAN_PATH"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -414,15 +435,25 @@ jobs:
           mv .harness "$RUNNER_TEMP/harness"
           echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/findings"
+      - name: install just and the setup tools (tools.lock)
+        if: inputs.config-setup-recipe != ''
+        env:
+          TOOLS: ${{ inputs.config-tools }}
+        run: |
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          "$HARNESS/scripts/install-tool.sh" just $TOOLS
+      - name: prepare the scan (config-setup-recipe)
+        if: inputs.config-setup-recipe != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.config-setup-recipe }}
+        run: just "$RECIPE"
       - run: '"$HARNESS/scripts/install-tool.sh" trivy'
       - name: trivy config (Dockerfile, Kubernetes, Helm)
         env:
           SCAN_PATH: ${{ inputs.scan-path }}
           TRIVYIGNORE: ${{ inputs.trivyignore }}
-        run: |
-          args=(--quiet --format sarif --output "$RUNNER_TEMP/findings/trivy-config.sarif")
-          if [ -f "$TRIVYIGNORE" ]; then args+=(--ignorefile "$TRIVYIGNORE"); fi
-          trivy config "${args[@]}" "$SCAN_PATH"
+        run: '"$HARNESS/scripts/trivy-config.sh" "$SCAN_PATH" "$RUNNER_TEMP/findings/trivy-config.sarif"'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact-prefix }}-findings-config

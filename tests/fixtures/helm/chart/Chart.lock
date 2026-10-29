@@ -1,0 +1,6 @@
+dependencies:
+- name: sub
+  repository: file://../sub
+  version: 0.1.0
+digest: sha256:da78b009933aa7e175d98d822bcf1735d3fa0f46623dfbde83c224af9de5f952
+generated: "2026-10-29T02:16:36.545217+01:00"

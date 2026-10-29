@@ -144,6 +144,18 @@ class ReportTests(Base):
         self.assertEqual((findings["semgrep-error"], findings["semgrep-other"]), (1, 1))
         self.assertEqual(proc.returncode, 1)
 
+    def test_in_source_suppression_is_not_a_finding(self):
+        c = self.case()
+        suppressed = result("r1")
+        suppressed["suppressions"] = [{"kind": "inSource"}]
+        rejected = result("r1", line=2)
+        rejected["suppressions"] = [{"kind": "inSource", "status": "rejected"}]
+        c.add("s.sarif", sarif("Semgrep OSS", [{"id": "r1", "defaultConfiguration": {"level": "error"}}],
+                               [suppressed, rejected]))
+        proc, findings = c.report("semgrep-error")
+        self.assertEqual(findings["semgrep-error"], 1)
+        self.assertEqual(proc.returncode, 1)
+
     def test_licenses(self):
         c = self.case()
         c.add("licenses.json", {"Results": [{"Target": "go.mod", "Licenses": [
