@@ -215,6 +215,8 @@ jobs:
       gitleaks-mode: dir
       fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error
       code-scanning: false
+      # Weekly too: every scanner, not only the dependency and image scans.
+      scheduled-full: true
       harness-ref: ${{ github.sha }}
 
   # The Node path of the scan (osv-scanner on the lockfile, trivy SBOM) on a
@@ -232,6 +234,8 @@ jobs:
       gitleaks-mode: dir
       fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error
       code-scanning: false
+      # Weekly too: every scanner, not only the dependency and image scans.
+      scheduled-full: true
       harness-ref: ${{ github.sha }}
 
   security-planted:
@@ -251,6 +255,8 @@ jobs:
       context: tests/fixtures/planted
       image-on: pull_request,push,schedule,workflow_dispatch
       code-scanning: false
+      # Weekly too: every scanner, not only the dependency and image scans.
+      scheduled-full: true
       harness-ref: ${{ github.sha }}
 
   # A chart whose dependency is not committed: trivy skips the whole chart,
@@ -295,6 +301,8 @@ jobs:
       config-setup-recipe: deps
       config-tools: helm
       code-scanning: false
+      # Weekly too: every scanner, not only the dependency and image scans.
+      scheduled-full: true
       harness-ref: ${{ github.sha }}
 
   # Dry run of the release workflow (not the merge of a release pull request:

@@ -1,6 +1,10 @@
 # Reusable security scan: secrets, dependencies, SAST, configuration,
 # licences, SBOM and (optionally) the container image.
 #
+# A scheduled run (the callers' weekly cron) scans the dependencies and the
+# image only: new advisories against unchanged code show up there. The other
+# scans repeat what the last pull request found (`scheduled-full` runs them).
+#
 # Every scanner job only reports. The `report` job reads all findings,
 # applies the repository's exceptions (security/vex.openvex.json,
 # .trivyignore.yaml, .gitleaks.toml / baseline) and fails when a category in
@@ -133,6 +137,15 @@ on:
         description: Upload results to the Security tab on public repositories.
         type: boolean
         default: true
+      scheduled-full:
+        description: >-
+          A scheduled run scans dependencies and the image only, where new
+          advisories appear without a code change; the secret, SAST,
+          configuration and licence scans and the SBOM ran on the pull request
+          that last changed the code. True runs them on schedule too (the
+          self-test).
+        type: boolean
+        default: false
       harness-ref:
         type: string
         default: v1
@@ -158,7 +171,7 @@ env:
 
 jobs:
   gitleaks:
-    if: inputs.gitleaks
+    if: inputs.gitleaks && (github.event_name != 'schedule' || inputs.scheduled-full)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -298,7 +311,7 @@ jobs:
           category: deps
 
   semgrep:
-    if: inputs.semgrep
+    if: inputs.semgrep && (github.event_name != 'schedule' || inputs.scheduled-full)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -350,7 +363,7 @@ jobs:
           category: semgrep
 
   sbom:
-    if: inputs.languages != '' && inputs.languages != 'none'
+    if: inputs.languages != '' && inputs.languages != 'none' && (github.event_name != 'schedule' || inputs.scheduled-full)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -414,7 +427,7 @@ jobs:
           retention-days: 90
 
   config:
-    if: inputs.config-scan
+    if: inputs.config-scan && (github.event_name != 'schedule' || inputs.scheduled-full)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -472,7 +485,7 @@ jobs:
           category: config
 
   licenses:
-    if: inputs.licenses
+    if: inputs.licenses && (github.event_name != 'schedule' || inputs.scheduled-full)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
