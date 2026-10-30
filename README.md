@@ -121,7 +121,9 @@ succeeded (see [templates/workflows/ci-go.yml](templates/workflows/ci-go.yml)).
 
 The check workflows (`ci.yml`, `security.yml`) run on pull requests into
 `main`, plus the weekly security scan; a run after the merge would test the
-same tree again. The version file decides what a pull request is
+same tree again. The weekly scan covers the dependencies and the image only,
+where new advisories appear without a code change (`scheduled-full: true`
+runs every scanner). The version file decides what a pull request is
 (`release-intent.yml`):
 
 | Kind | Made with | Title | Version | On the pull request | After the merge |
