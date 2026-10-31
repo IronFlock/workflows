@@ -154,7 +154,10 @@ released commit (never a force push), for a hosting service that deploys from
 a branch: only release merges reach it. Protect that branch with a ruleset
 whose only bypass actor is the release App.
 With `github-release: true` it also creates the GitHub release of the tag
-(generated notes), with the same token, so callers need no write rights. Both
+(generated notes), with the same token, so callers need no write rights.
+`release-notes` names a Markdown file in the repository to use as the
+release's text instead (`{version}` stands for the version, e.g.
+`release-notes/{version}.md`); the step fails when that file is missing. Both
 steps catch up on a re-run that finds the tag already set.
 
 ## Pull requests from a laptop

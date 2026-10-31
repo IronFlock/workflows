@@ -39,6 +39,13 @@ on:
         description: Create the GitHub release of the tag (generated notes) after the tag.
         type: boolean
         default: false
+      release-notes:
+        description: >-
+          With github-release: the Markdown file that is the release's text, `{version}` standing for
+          the version without the tag prefix (e.g. release-notes/{version}.md); the file must exist.
+          Empty = notes generated from the merged pull requests.
+        type: string
+        default: ""
       harness-ref:
         description: Ref of IronFlock/workflows the harness scripts are taken from.
         type: string
@@ -135,9 +142,18 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          NOTES: ${{ inputs.release-notes }}
         run: |
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "the GitHub release $TAG exists"
+          elif [ -n "$NOTES" ]; then
+            notes=${NOTES//"{version}"/${TAG#"$TAG_PREFIX"}}
+            if [ ! -f "$notes" ]; then
+              echo "::error::$TAG has no release notes: $notes is missing"
+              exit 1
+            fi
+            gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TAG" --notes-file "$notes"
           else
             gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TAG" --generate-notes
           fi
