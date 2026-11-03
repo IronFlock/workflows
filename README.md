@@ -116,9 +116,12 @@ self-test; a change to triggers or settings needs a pull request per repository.
 downloaded — with `gpgv` or `sqv`, which every apt-based host has. The private
 key stays in Cloud KMS (`-kms-key`, Application Default Credentials: the
 release job's workload identity) or OpenBao transit (`-signer`); the tool
-hashes locally and sends only digests. A release job runs it from its harness
-checkout (add `tools/sign-openpgp` to the sparse checkout, set up Go from its
-`go.mod`):
+hashes locally and sends only digests. The signing account needs two roles on
+the KMS key, `roles/cloudkms.signer` and `roles/cloudkms.publicKeyViewer`:
+before it signs, the tool reads the key's public half to check it against the
+certificate (`-cert`), and `signer` alone does not allow that. A release job
+runs it from its harness checkout (add `tools/sign-openpgp` to the sparse
+checkout, set up Go from its `go.mod`):
 
 ```sh
 cd "$HARNESS/tools/sign-openpgp"
