@@ -109,6 +109,28 @@ them from [templates/workflows](templates/workflows). A change to the logic is
 made once here and reaches every repository when `v1` moves after a green
 self-test; a change to triggers or settings needs a pull request per repository.
 
+## Release signatures
+
+[tools/sign-openpgp](tools/sign-openpgp) makes the detached OpenPGP signatures
+(`<file>.asc`) that an install or update checks before it runs or uses what it
+downloaded — with `gpgv` or `sqv`, which every apt-based host has. The private
+key stays in Cloud KMS (`-kms-key`, Application Default Credentials: the
+release job's workload identity) or OpenBao transit (`-signer`); the tool
+hashes locally and sends only digests. A release job runs it from its harness
+checkout (add `tools/sign-openpgp` to the sparse checkout, set up Go from its
+`go.mod`):
+
+```sh
+cd "$HARNESS/tools/sign-openpgp"
+go run . sign -cert "$CERT" -kms-key "$KMS_KEY_VERSION" FILE...   # writes FILE.asc
+go run . verify -cert "$CERT" FILE...
+```
+
+`cert` makes the public certificate once (`-uid` names it), `export` its base64
+form for a script to embed, `fingerprint` the fingerprint the operator docs
+publish, `keygen` a development key for tests. The commands are documented at
+the top of [main.go](tools/sign-openpgp/main.go).
+
 ## Protected main branch
 
 Each repository protects `main` with a ruleset: changes only through pull
