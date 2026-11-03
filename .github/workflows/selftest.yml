@@ -82,6 +82,33 @@ jobs:
             exit 1
           fi
 
+  # The release signer callers run from their harness checkout
+  # (tools/sign-openpgp): its tests sign with a development key and check the
+  # signatures with gpgv, as an appliance or device does.
+  sign-openpgp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: tools/sign-openpgp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/sign-openpgp/go.mod
+          cache: false
+      - name: gofmt, go mod tidy, go vet
+        run: |
+          test -z "$(gofmt -l .)"
+          go mod tidy -diff
+          go vet ./...
+      - name: unit tests
+        run: |
+          command -v gpgv
+          go test -race -count=1 ./...
+
   gate-pass:
     uses: ./.github/workflows/go-gate.yml
     with:
