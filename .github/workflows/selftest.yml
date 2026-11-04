@@ -2,11 +2,13 @@
 # the fixtures in tests/fixtures:
 #   positive controls  go-pass passes the gate and the scan with every fail-on
 #                      category set; node-pass-npm / node-pass-bun pass the node
-#                      gate; python-pass passes the python gate; this
-#                      repository's own workflows lint clean
+#                      gate; python-pass passes the python gate; shell-pass
+#                      passes the shell gate and its build output reaches a
+#                      later job; this repository's own workflows lint clean
 #   negative controls  planted findings (fake key, reachable vulnerable call,
 #                      secret logged to the console, root container, unpinned
-#                      action, failing Go, Node and Python tests, a second or missing
+#                      action, failing Go, Node, Python and bats tests, an
+#                      unquoted shell expansion, a second or missing
 #                      lockfile, a privileged container in a Helm chart) are each
 #                      reported; a Helm chart trivy skips fails the scan
 # Negative controls run report-only and are asserted from the outputs, so the
@@ -227,6 +229,56 @@ jobs:
             exit 1
           fi
           echo "just test failed as expected"
+
+  shell-gate-pass:
+    uses: ./.github/workflows/shell-gate.yml
+    with:
+      working-directory: tests/fixtures/shell-pass
+      build-args: out
+      build-artifact-path: tests/fixtures/shell-pass/out/greeting.txt
+      build-artifact-name: shell-gate-selftest
+      build-artifact-retention-days: 1
+      harness-ref: ${{ github.sha }}
+
+  # The build output of the gate must reach a later job of the caller (an
+  # image test, a release): the artifact is downloaded and checked here.
+  shell-gate-artifact:
+    needs: [shell-gate-pass]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: shell-gate-selftest
+          path: out
+      - name: the build output reached this job
+        run: grep -qx 'hello world' out/greeting.txt
+
+  shell-gate-fail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: scripts/install-tool.sh just shellcheck shfmt
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends bats bats-support bats-assert
+      - name: the planted findings must fail `just lint` and `just test`
+        working-directory: tests/fixtures/shell-fail
+        run: |
+          fail=0
+          if just lint; then
+            echo "::error::just lint passed although greet.sh has an unquoted expansion"
+            fail=1
+          fi
+          if just test; then
+            echo "::error::just test passed although a bats test fails"
+            fail=1
+          fi
+          [ "$fail" = 0 ] && echo "just lint and just test failed as expected"
+          exit "$fail"
 
   security-clean:
     uses: ./.github/workflows/security.yml
@@ -466,7 +518,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

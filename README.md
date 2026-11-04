@@ -43,6 +43,7 @@ The inputs of each workflow are documented in its `on.workflow_call` block.
 | [go-gate.yml](.github/workflows/go-gate.yml) | `lint`, `unit`, `build` | Go gate; cross-build matrix from `targets` / `targets-file` |
 | [node-gate.yml](.github/workflows/node-gate.yml) | `lint`, `unit`, `build` | Node/Bun gate: `package-manager` bun or npm, installs from the lockfile only (`bun install --frozen-lockfile` / `npm ci`), fails on a lockfile of the other package manager; `skip` drops jobs a repository has no recipe for |
 | [python-gate.yml](.github/workflows/python-gate.yml) | `lint`, `unit`, `build` | Python gate: uv from `tools.lock`; with a `uv.lock`, `uv sync --frozen` (all groups) before the recipes, otherwise the recipes bring their own tools (pinned `uvx`) |
+| [shell-gate.yml](.github/workflows/shell-gate.yml) | `lint`, `unit`, `build` | Shell/just gate (image builders, installers, script collections): just, shellcheck, shfmt from `tools.lock`, yamllint and bats from the Ubuntu archive; `build-apt-packages` for build tools, `build-args` for the build recipe, `build-runs-on` for a native arm64 build, `build-artifact-path` hands the build output to a later job |
 | [security.yml](.github/workflows/security.yml) | `gitleaks`, `deps`, `semgrep`, `sbom`, `config`, `licenses`, `image`, `report` | security screening; `report` applies `fail-on` |
 | [workflows-lint.yml](.github/workflows/workflows-lint.yml) | `lint` | actionlint, zizmor, pinact on the caller's workflows; always blocking |
 | [release-intent.yml](.github/workflows/release-intent.yml) | `intent` | the version file decides: a rise makes a release PR (title `release <name> <tag>` required), an unchanged version a no-release PR; output `kind` gates the release dry run; listed in the `needs` of `ci-ok` |
@@ -50,15 +51,15 @@ The inputs of each workflow are documented in its `on.workflow_call` block.
 | [release-tag.yml](.github/workflows/release-tag.yml) | `tag` | the annotated git tag of a release, after every image job of the caller; a tag always means "in the registry"; written with a token of the release GitHub App from the caller's `release` environment |
 | [selftest.yml](.github/workflows/selftest.yml) | — | proves the harness against [tests/fixtures](tests/fixtures) |
 
-Gates for Node, Python and chart/shell repositories follow the same pattern
-and are added when the first repository of that kind adopts the harness.
+A gate for chart repositories follows the same pattern and is added when the
+first repository of that kind adopts the harness.
 
 ## Recipe contract
 
 | Recipe | Meaning |
 |---|---|
-| `lint` | non-mutating static checks. Go: `gofmt -l`, `go mod tidy -diff`, `go vet`, golangci-lint (incl. gosec, config in [templates/repo/.golangci.yml](templates/repo/.golangci.yml)) |
-| `test` | hermetic unit tests. Go: `go test -race -shuffle=on -count=1 ./...` |
+| `lint` | non-mutating static checks. Go: `gofmt -l`, `go mod tidy -diff`, `go vet`, golangci-lint (incl. gosec, config in [templates/repo/.golangci.yml](templates/repo/.golangci.yml)). Shell: `just --fmt --check`, `shellcheck`, `shfmt -d`, `yamllint` |
+| `test` | hermetic unit tests. Go: `go test -race -shuffle=on -count=1 ./...`. Shell: `bats` |
 | `build` | the artefact build, without publishing |
 | `sarif`, `sbom` | optional (Go): write govulncheck SARIF / CycloneDX files; otherwise the harness runs govulncheck and cyclonedx-gomod itself |
 

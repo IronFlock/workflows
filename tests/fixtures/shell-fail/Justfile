@@ -1,0 +1,14 @@
+# Recipe contract of a shell repository, in its smallest form.
+
+lint:
+    just --fmt --check --unstable
+    shellcheck greet.sh
+    shfmt -d -i 2 greet.sh
+    yamllint -d relaxed config.yml
+
+test:
+    bats test
+
+build OUT="out":
+    mkdir -p "{{ OUT }}"
+    ./greet.sh world > "{{ OUT }}/greeting.txt"
