@@ -3,7 +3,7 @@
 
   sarif-summary.py report --dir DIR [--fail-on CATS] [--vex FILE] [--trivyignore FILE]
                           [--jobs JSON] [--summary FILE] [--output FILE]
-  sarif-summary.py upload-copy --dir DIR --out DIR
+  sarif-summary.py upload-copy --dir DIR --out DIR [--vex FILE]
 
 `report` reads every *.sarif and licenses*.json below DIR, sorts each finding
 into one category, drops findings an OpenVEX statement marks not_affected or
@@ -17,8 +17,11 @@ misconfig-other, license-forbidden, license-restricted, semgrep-error,
 semgrep-other, other. `vuln-high` in --fail-on blocks high and critical.
 
 `upload-copy` writes SARIF copies for GitHub code scanning: results without a
-source location are dropped (code scanning rejects them), and only the first
-run per tool is kept.
+source location are dropped (code scanning rejects them), so are
+vulnerabilities a valid statement in the --vex file accepts (the report does
+not count them either), and only the first run per tool is kept. A run whose
+results are all accepted is still written, empty: that upload closes the
+alerts of earlier uploads.
 
 Standard library only; run with `python3 -I`.
 """
@@ -136,6 +139,23 @@ def location_of(result):
     return ""
 
 
+def rule_of(rules, rule_list, result):
+    rule = rules.get(result.get("ruleId"))
+    if rule is None and isinstance(result.get("ruleIndex"), int) and result["ruleIndex"] < len(rule_list):
+        rule = rule_list[result["ruleIndex"]]
+    return rule or {}
+
+
+def vex_match(category, rule, result, vex):
+    """The (vuln id, VEX entry) covering a vulnerability finding, or None."""
+    if not category.startswith("vuln"):
+        return None
+    for vid in finding_ids(rule, result):
+        if vid in vex:
+            return vid, vex[vid]
+    return None
+
+
 def load_vex(path):
     """Return ({vuln id: (status, justification, valid_until)}, warnings)."""
     entries, warnings = {}, []
@@ -201,10 +221,7 @@ def collect(directory, vex):
                 # without a status, or accepted, takes the result out.
                 if any((s or {}).get("status", "accepted") == "accepted" for s in result.get("suppressions") or []):
                     continue
-                rule = rules.get(result.get("ruleId"))
-                if rule is None and isinstance(result.get("ruleIndex"), int) and result["ruleIndex"] < len(rule_list):
-                    rule = rule_list[result["ruleIndex"]]
-                rule = rule or {}
+                rule = rule_of(rules, rule_list, result)
                 category = classify(tool, rule, result)
                 item = {
                     "tool": tool,
@@ -213,12 +230,7 @@ def collect(directory, vex):
                     "location": location_of(result),
                     "message": " ".join(((result.get("message") or {}).get("text") or "").split())[:140],
                 }
-                match = None
-                if category.startswith("vuln"):
-                    for vid in finding_ids(rule, result):
-                        if vid in vex:
-                            match = (vid, vex[vid])
-                            break
+                match = vex_match(category, rule, result, vex)
                 if match and match[1][2] >= now:
                     item["vex"] = f"{match[0]}: {match[1][0]} ({match[1][1]})"
                     suppressed.append(item)
@@ -327,13 +339,15 @@ def cmd_report(args):
 
 def cmd_upload_copy(args):
     os.makedirs(args.out, exist_ok=True)
+    vex, _ = load_vex(args.vex)
+    now = today()
     seen_tools = set()
     for path in sorted(glob.glob(os.path.join(args.dir, "**", "*.sarif"), recursive=True)):
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
-        runs = []
+        runs, accepted = [], 0
         for run in doc.get("runs") or []:
-            tool = ((run.get("tool") or {}).get("driver") or {}).get("name") or "unknown"
+            tool, rules, rule_list = rule_index(run)
             results = run.get("results") or []
             located = [r for r in results if location_of(r)]
             if results and not located:
@@ -341,14 +355,22 @@ def cmd_upload_copy(args):
             if tool in seen_tools:
                 continue
             seen_tools.add(tool)
-            run["results"] = located
+            kept = []
+            for result in located:
+                rule = rule_of(rules, rule_list, result)
+                match = vex_match(classify(tool, rule, result), rule, result, vex)
+                if match and match[1][2] >= now:
+                    accepted += 1
+                    continue
+                kept.append(result)
+            run["results"] = kept
             runs.append(run)
         if runs:
             doc["runs"] = runs
             name = os.path.basename(path)
             with open(os.path.join(args.out, name), "w", encoding="utf-8") as fh:
                 json.dump(doc, fh)
-            print(f"upload copy: {name} ({sum(len(r['results']) for r in runs)} located results)")
+            print(f"upload copy: {name} ({sum(len(r['results']) for r in runs)} located results, {accepted} accepted left out)")
     return 0
 
 
@@ -366,6 +388,7 @@ def main():
     up = sub.add_parser("upload-copy")
     up.add_argument("--dir", required=True)
     up.add_argument("--out", required=True)
+    up.add_argument("--vex")
     args = parser.parse_args()
     return cmd_report(args) if args.cmd == "report" else cmd_upload_copy(args)
 

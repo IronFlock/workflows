@@ -11,9 +11,10 @@
 # `fail-on` has findings or a scanner job broke. Report-only = `fail-on: ""`.
 #
 # Callers need `permissions: contents: read, security-events: write`.
-# On public repositories results also go to the Security tab (code scanning);
-# private repositories without GitHub Advanced Security get the summary and
-# the artifacts only.
+# On public repositories results also go to the Security tab (code
+# scanning), without the vulnerabilities the VEX file accepts, so the tab and
+# the report agree; private repositories without GitHub Advanced Security get
+# the summary and the artifacts only.
 name: security
 
 on:
@@ -134,7 +135,7 @@ on:
         type: string
         default: security
       code-scanning:
-        description: Upload results to the Security tab on public repositories.
+        description: Upload results to the Security tab on public repositories (without the vulnerabilities the VEX file accepts).
         type: boolean
         default: true
       scheduled-full:
@@ -300,8 +301,10 @@ jobs:
           retention-days: 90
       - id: cs
         if: always() && inputs.code-scanning && !github.event.repository.private
+        env:
+          VEX: ${{ inputs.vex-file }}
         run: |
-          python3 -I "$HARNESS/scripts/sarif-summary.py" upload-copy --dir "$RUNNER_TEMP/findings" --out "$RUNNER_TEMP/code-scanning"
+          python3 -I "$HARNESS/scripts/sarif-summary.py" upload-copy --dir "$RUNNER_TEMP/findings" --out "$RUNNER_TEMP/code-scanning" --vex "$VEX"
           echo "files=$(find "$RUNNER_TEMP/code-scanning" -name '*.sarif' | wc -l)" >> "$GITHUB_OUTPUT"
       - uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         if: always() && steps.cs.outputs.files > 0
@@ -597,8 +600,10 @@ jobs:
           retention-days: 90
       - id: cs
         if: always() && inputs.code-scanning && !github.event.repository.private
+        env:
+          VEX: ${{ inputs.vex-file }}
         run: |
-          python3 -I "$HARNESS/scripts/sarif-summary.py" upload-copy --dir "$RUNNER_TEMP/findings" --out "$RUNNER_TEMP/code-scanning"
+          python3 -I "$HARNESS/scripts/sarif-summary.py" upload-copy --dir "$RUNNER_TEMP/findings" --out "$RUNNER_TEMP/code-scanning" --vex "$VEX"
           echo "files=$(find "$RUNNER_TEMP/code-scanning" -name '*.sarif' | wc -l)" >> "$GITHUB_OUTPUT"
       - uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         if: always() && steps.cs.outputs.files > 0

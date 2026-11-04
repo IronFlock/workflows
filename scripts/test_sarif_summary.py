@@ -206,6 +206,44 @@ class UploadCopyTests(Base):
         subprocess.run([sys.executable, "-I", SCRIPT, "upload-copy", "--dir", c.dir, "--out", out], check=True, capture_output=True)
         self.assertEqual(sorted(os.listdir(out)), ["govulncheck-code.sarif", "trivy.sarif"])
 
+    def upload(self, c, vex=None):
+        out = os.path.join(c.tmp.name, "cs")
+        cmd = [sys.executable, "-I", SCRIPT, "upload-copy", "--dir", c.dir, "--out", out]
+        if vex:
+            cmd += ["--vex", vex]
+        subprocess.run(cmd, check=True, capture_output=True, env={**os.environ, "SUMMARY_TODAY": TODAY})
+        copies = {}
+        for name in os.listdir(out):
+            with open(os.path.join(out, name)) as fh:
+                copies[name] = [r["ruleId"] for r in json.load(fh)["runs"][0]["results"]]
+        return copies
+
+    def test_vex_accepted_results_are_left_out(self):
+        c = self.case()
+        c.add("gv.sarif", sarif("govulncheck", [{"id": "GO-1"}, {"id": "GO-2"}, {"id": "GO-3"}],
+                                [result("GO-1", "error"), result("GO-2", "error", line=2), result("GO-3", "error", line=3)]))
+        suppressed = result("r1")
+        suppressed["suppressions"] = [{"kind": "inSource"}]
+        c.add("s.sarif", sarif("Semgrep OSS", [{"id": "r1"}], [suppressed, result("r1", line=2)]))
+        vex = c.file("vex.json", json.dumps({"statements": [
+            {"vulnerability": {"name": "GO-1"}, "status": "not_affected",
+             "justification": "vulnerable_code_not_in_execute_path", "timestamp": "2026-06-01T00:00:00Z"},
+            {"vulnerability": {"name": "GO-3"}, "status": "not_affected",
+             "justification": "vulnerable_code_not_in_execute_path", "timestamp": "2025-09-01T00:00:00Z"}]}))
+        copies = self.upload(c, vex)
+        self.assertEqual(copies["gv.sarif"], ["GO-2", "GO-3"], "a valid VEX statement leaves the result out, an expired one does not")
+        self.assertEqual(copies["s.sarif"], ["r1", "r1"], "in-source suppressions stay as they are")
+        self.assertEqual(self.upload(c)["gv.sarif"], ["GO-1", "GO-2", "GO-3"], "without --vex nothing is accepted")
+
+    def test_run_with_only_accepted_results_is_uploaded_empty(self):
+        # The empty upload closes the alerts of earlier uploads.
+        c = self.case()
+        c.add("gv.sarif", sarif("govulncheck", [{"id": "GO-1"}], [result("GO-1", "error")]))
+        vex = c.file("vex.json", json.dumps({"statements": [
+            {"vulnerability": {"name": "GO-1"}, "status": "not_affected",
+             "justification": "vulnerable_code_not_in_execute_path", "timestamp": "2026-06-01T00:00:00Z"}]}))
+        self.assertEqual(self.upload(c, vex), {"gv.sarif": []})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
