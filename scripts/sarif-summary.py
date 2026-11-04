@@ -17,11 +17,12 @@ misconfig-other, license-forbidden, license-restricted, semgrep-error,
 semgrep-other, other. `vuln-high` in --fail-on blocks high and critical.
 
 `upload-copy` writes SARIF copies for GitHub code scanning: results without a
-source location are dropped (code scanning rejects them), so are
-vulnerabilities a valid statement in the --vex file accepts (the report does
-not count them either), and only the first run per tool is kept. A run whose
-results are all accepted is still written, empty: that upload closes the
-alerts of earlier uploads.
+source location are dropped (code scanning rejects them), so are results
+suppressed in the source (code scanning ignores SARIF suppressions and would
+open an alert for a reviewed `nosemgrep`) and vulnerabilities a valid
+statement in the --vex file accepts (the report counts neither), and only the
+first run per tool is kept. A run whose results are all suppressed or accepted
+is still written, empty: that upload closes the alerts of earlier uploads.
 
 Standard library only; run with `python3 -I`.
 """
@@ -139,6 +140,14 @@ def location_of(result):
     return ""
 
 
+def suppressed_in_source(result):
+    """True for a result the scanner saw suppressed in the source (`nosemgrep`).
+
+    Such suppressions stay in the SARIF; one without a status, or accepted,
+    takes the result out. A rejected one does not."""
+    return any((s or {}).get("status", "accepted") == "accepted" for s in result.get("suppressions") or [])
+
+
 def rule_of(rules, rule_list, result):
     rule = rules.get(result.get("ruleId"))
     if rule is None and isinstance(result.get("ruleIndex"), int) and result["ruleIndex"] < len(rule_list):
@@ -217,9 +226,7 @@ def collect(directory, vex):
         for run in doc.get("runs") or []:
             tool, rules, rule_list = rule_index(run)
             for result in run.get("results") or []:
-                # In-source suppressions (`nosemgrep`) stay in the SARIF; one
-                # without a status, or accepted, takes the result out.
-                if any((s or {}).get("status", "accepted") == "accepted" for s in result.get("suppressions") or []):
+                if suppressed_in_source(result):
                     continue
                 rule = rule_of(rules, rule_list, result)
                 category = classify(tool, rule, result)
@@ -345,7 +352,7 @@ def cmd_upload_copy(args):
     for path in sorted(glob.glob(os.path.join(args.dir, "**", "*.sarif"), recursive=True)):
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
-        runs, accepted = [], 0
+        runs, accepted, suppressed = [], 0, 0
         for run in doc.get("runs") or []:
             tool, rules, rule_list = rule_index(run)
             results = run.get("results") or []
@@ -357,6 +364,9 @@ def cmd_upload_copy(args):
             seen_tools.add(tool)
             kept = []
             for result in located:
+                if suppressed_in_source(result):
+                    suppressed += 1
+                    continue
                 rule = rule_of(rules, rule_list, result)
                 match = vex_match(classify(tool, rule, result), rule, result, vex)
                 if match and match[1][2] >= now:
@@ -370,7 +380,8 @@ def cmd_upload_copy(args):
             name = os.path.basename(path)
             with open(os.path.join(args.out, name), "w", encoding="utf-8") as fh:
                 json.dump(doc, fh)
-            print(f"upload copy: {name} ({sum(len(r['results']) for r in runs)} located results, {accepted} accepted left out)")
+            print(f"upload copy: {name} ({sum(len(r['results']) for r in runs)} located results, "
+                  f"{suppressed} suppressed in source and {accepted} accepted left out)")
     return 0
 
 

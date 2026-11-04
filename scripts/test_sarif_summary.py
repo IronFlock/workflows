@@ -224,7 +224,10 @@ class UploadCopyTests(Base):
                                 [result("GO-1", "error"), result("GO-2", "error", line=2), result("GO-3", "error", line=3)]))
         suppressed = result("r1")
         suppressed["suppressions"] = [{"kind": "inSource"}]
-        c.add("s.sarif", sarif("Semgrep OSS", [{"id": "r1"}], [suppressed, result("r1", line=2)]))
+        rejected = result("r3", line=3)
+        rejected["suppressions"] = [{"kind": "inSource", "status": "rejected"}]
+        c.add("s.sarif", sarif("Semgrep OSS", [{"id": "r1"}, {"id": "r2"}, {"id": "r3"}],
+                               [suppressed, result("r2", line=2), rejected]))
         vex = c.file("vex.json", json.dumps({"statements": [
             {"vulnerability": {"name": "GO-1"}, "status": "not_affected",
              "justification": "vulnerable_code_not_in_execute_path", "timestamp": "2026-06-01T00:00:00Z"},
@@ -232,7 +235,8 @@ class UploadCopyTests(Base):
              "justification": "vulnerable_code_not_in_execute_path", "timestamp": "2025-09-01T00:00:00Z"}]}))
         copies = self.upload(c, vex)
         self.assertEqual(copies["gv.sarif"], ["GO-2", "GO-3"], "a valid VEX statement leaves the result out, an expired one does not")
-        self.assertEqual(copies["s.sarif"], ["r1", "r1"], "in-source suppressions stay as they are")
+        self.assertEqual(copies["s.sarif"], ["r2", "r3"],
+                         "an in-source suppression leaves the result out (code scanning ignores SARIF suppressions), a rejected one does not")
         self.assertEqual(self.upload(c)["gv.sarif"], ["GO-1", "GO-2", "GO-3"], "without --vex nothing is accepted")
 
     def test_run_with_only_accepted_results_is_uploaded_empty(self):
@@ -243,6 +247,14 @@ class UploadCopyTests(Base):
             {"vulnerability": {"name": "GO-1"}, "status": "not_affected",
              "justification": "vulnerable_code_not_in_execute_path", "timestamp": "2026-06-01T00:00:00Z"}]}))
         self.assertEqual(self.upload(c, vex), {"gv.sarif": []})
+
+    def test_run_with_only_source_suppressed_results_is_uploaded_empty(self):
+        # Same reason: an earlier upload may have opened the alert.
+        c = self.case()
+        suppressed = result("r1")
+        suppressed["suppressions"] = [{"kind": "inSource"}]
+        c.add("s.sarif", sarif("Semgrep OSS", [{"id": "r1"}], [suppressed]))
+        self.assertEqual(self.upload(c), {"s.sarif": []})
 
 
 if __name__ == "__main__":
