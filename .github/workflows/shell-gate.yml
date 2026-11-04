@@ -1,0 +1,223 @@
+# Reusable gate for shell and just repositories (image builders, installers,
+# script collections): lint, unit tests, build.
+#
+# Every logic step is a `just` recipe of the calling repository, so the gate
+# runs the same locally and in CI. `just` runs from `working-directory` and
+# finds the repository's Justfile upwards from there.
+#
+# Recipe contract (see README):
+#   lint   non-mutating static checks: just --fmt --check, shellcheck,
+#          shfmt -d, yamllint where configured
+#   test   hermetic unit tests (bats)
+#   build  the repository's artefact build, without publishing
+#
+# The gate provides the tools, the recipes decide how to use them: just,
+# shellcheck and shfmt from tools.lock in every job, yamllint (lint) and bats
+# with bats-support and bats-assert (unit) from the Ubuntu archive. A build
+# that needs more (mmdebstrap, genimage, qemu) names them in
+# `build-apt-packages`. `build-artifact-path` hands the build output to a
+# later job of the caller (an image test, a release), as an artifact.
+#
+# Job names stay `lint` / `unit` / `build`, as in the other gates.
+name: shell-gate
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory `just` runs from.
+        type: string
+        default: "."
+      skip:
+        description: Comma list of jobs to skip (lint, unit, build).
+        type: string
+        default: ""
+      tools:
+        description: Extra tools from tools.lock to install in every job (space-separated).
+        type: string
+        default: ""
+      apt-packages:
+        description: Extra Ubuntu packages for every job (space-separated).
+        type: string
+        default: ""
+      build-apt-packages:
+        description: Extra Ubuntu packages for the build job only (space-separated).
+        type: string
+        default: ""
+      lint-recipe:
+        type: string
+        default: lint
+      test-recipe:
+        type: string
+        default: test
+      build-recipe:
+        type: string
+        default: build
+      build-args:
+        description: Arguments of the build recipe (space-separated words), e.g. "amd64-efi base".
+        type: string
+        default: ""
+      build-runs-on:
+        description: Runner of the build job (ubuntu-24.04-arm for a native arm64 build).
+        type: string
+        default: ubuntu-latest
+      build-timeout-minutes:
+        type: number
+        default: 30
+      build-artifact-path:
+        description: Files the build leaves for later jobs, relative to the repository root (upload-artifact path syntax); empty uploads nothing.
+        type: string
+        default: ""
+      build-artifact-name:
+        type: string
+        default: build
+      build-artifact-retention-days:
+        type: number
+        default: 3
+      harness-ref:
+        description: Ref of IronFlock/workflows the harness scripts are taken from.
+        type: string
+        default: v1
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    if: ${{ !contains(inputs.skip, 'lint') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: install just, shellcheck and shfmt (and extra tools)
+        env:
+          TOOLS: ${{ inputs.tools }}
+        run: |
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          "$HARNESS/scripts/install-tool.sh" just shellcheck shfmt $TOOLS
+      - name: install yamllint (and extra packages)
+        env:
+          PKGS: ${{ inputs.apt-packages }}
+        run: |
+          sudo apt-get update -qq
+          # shellcheck disable=SC2086 # a space-separated list of package names
+          sudo apt-get install -y -qq --no-install-recommends yamllint $PKGS
+      - name: just ${{ inputs.lint-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.lint-recipe }}
+        run: just "$RECIPE"
+
+  unit:
+    if: ${{ !contains(inputs.skip, 'unit') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: install just, shellcheck and shfmt (and extra tools)
+        env:
+          TOOLS: ${{ inputs.tools }}
+        run: |
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          "$HARNESS/scripts/install-tool.sh" just shellcheck shfmt $TOOLS
+      - name: install bats (and extra packages)
+        env:
+          PKGS: ${{ inputs.apt-packages }}
+        run: |
+          sudo apt-get update -qq
+          # shellcheck disable=SC2086 # a space-separated list of package names
+          sudo apt-get install -y -qq --no-install-recommends bats bats-support bats-assert $PKGS
+      - name: just ${{ inputs.test-recipe }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.test-recipe }}
+        run: just "$RECIPE"
+
+  build:
+    if: ${{ !contains(inputs.skip, 'build') }}
+    runs-on: ${{ inputs.build-runs-on }}
+    timeout-minutes: ${{ inputs.build-timeout-minutes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: install just, shellcheck and shfmt (and extra tools)
+        env:
+          TOOLS: ${{ inputs.tools }}
+        run: |
+          # shellcheck disable=SC2086 # a space-separated list of tool names
+          "$HARNESS/scripts/install-tool.sh" just shellcheck shfmt $TOOLS
+      - name: install build packages
+        if: ${{ inputs.apt-packages != '' || inputs.build-apt-packages != '' }}
+        env:
+          PKGS: ${{ inputs.apt-packages }} ${{ inputs.build-apt-packages }}
+        run: |
+          sudo apt-get update -qq
+          # shellcheck disable=SC2086 # a space-separated list of package names
+          sudo apt-get install -y -qq --no-install-recommends $PKGS
+      - name: just ${{ inputs.build-recipe }} ${{ inputs.build-args }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.build-recipe }}
+          ARGS: ${{ inputs.build-args }}
+        run: |
+          # shellcheck disable=SC2086 # recipe arguments are space-separated words
+          just "$RECIPE" $ARGS
+      - name: upload the build output
+        if: ${{ inputs.build-artifact-path != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.build-artifact-name }}
+          path: ${{ inputs.build-artifact-path }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.build-artifact-retention-days }}
