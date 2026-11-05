@@ -68,6 +68,16 @@ jobs:
           "$RUNNER_TEMP/bin/helm" version --short | grep -q '^v3\.22\.0'
       - name: shellcheck
         run: shellcheck scripts/*.sh
+      # The workflows run the scripts directly ("$HARNESS/scripts/<name>"): one
+      # committed without the executable bit fails a release with "Permission
+      # denied". Tests run through bash or python3 and may stay as they are.
+      - name: every script the workflows run is executable
+        run: |
+          bad=$(git ls-files -s scripts | awk '$1 != "100755" && $4 !~ /^scripts\/test_/ { print $4 }')
+          if [ -n "$bad" ]; then
+            echo "::error::not executable in git (git update-index --chmod=+x <file>): $bad"
+            exit 1
+          fi
       - name: sarif-summary unit tests
         run: python3 -I scripts/test_sarif_summary.py
       - name: release.sh unit tests

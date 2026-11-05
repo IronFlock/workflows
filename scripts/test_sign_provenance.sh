@@ -19,7 +19,7 @@ export EXPECT_RUN=https://github.com/IronFlock/example/actions/runs/123
 check() { # check <name> <expected exit: 0|1> <jq edit of the fixture> [<platform>]
   local name=$1 want=$2 edit=$3 platform=${4:-linux/amd64} got=0
   jq "$edit" "$fixture" >"$work/predicate.json"
-  bash "$script" check "$work/predicate.json" "$platform" >"$work/log" 2>&1 || got=$?
+  "$script" check "$work/predicate.json" "$platform" >"$work/log" 2>&1 || got=$?
   if { [ "$want" = 0 ] && [ "$got" = 0 ]; } || { [ "$want" = 1 ] && [ "$got" != 0 ]; }; then
     echo "ok   $name"
   else

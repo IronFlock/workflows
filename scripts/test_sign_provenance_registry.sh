@@ -73,18 +73,18 @@ export EXPECT_REVISION
 EXPECT_REVISION=$(git -C "$src" rev-parse HEAD)
 export EXPECT_RUN=$run
 
-expect "another commit expected: refused" 1 env EXPECT_REVISION=fedcba9876543210fedcba9876543210fedcba98 bash "$script" sign "$index"
+expect "another commit expected: refused" 1 env EXPECT_REVISION=fedcba9876543210fedcba9876543210fedcba98 "$script" sign "$index"
 expect "  and nothing attached" 0 test "$(attestations "$index" "$work/release.pub")" = 0
-expect "both platforms signed" 0 bash "$script" sign "$index"
+expect "both platforms signed" 0 "$script" sign "$index"
 expect "  two attestations verify" 0 test "$(attestations "$index" "$work/release.pub")" = 2
 expect "  they name both platforms" 0 bash -c "\"$COSIGN\" verify-attestation --allow-http-registry --key '$work/release.pub' --type slsaprovenance1 --insecure-ignore-tlog '$index' 2>/dev/null | jq -r '.payload | @base64d | fromjson | .predicate.buildDefinition.internalParameters.targetPlatform' | sort | paste -sd, - | grep -qx linux/amd64,linux/arm64"
 expect "  another key verifies none" 0 test "$(attestations "$index" "$work/other.pub")" = 0
-expect "re-run signs nothing twice" 0 bash "$script" sign "$index"
+expect "re-run signs nothing twice" 0 "$script" sign "$index"
 expect "  still two attestations" 0 test "$(attestations "$index" "$work/release.pub")" = 2
-expect "a single-platform index" 0 env COSIGN_KEY="$work/other.key" COSIGN_PUBLIC_KEY="$work/other.pub" bash "$script" sign "$single"
-expect "  an attestation by another key does not count" 0 bash "$script" sign "$single"
+expect "a single-platform index" 0 env COSIGN_KEY="$work/other.key" COSIGN_PUBLIC_KEY="$work/other.pub" "$script" sign "$single"
+expect "  an attestation by another key does not count" 0 "$script" sign "$single"
 expect "  one attestation verifies with each key" 0 test "$(attestations "$single" "$work/release.pub")$(attestations "$single" "$work/other.pub")" = 11
-expect "not a digest reference" 1 bash "$script" sign "$image:v0.0.1"
+expect "not a digest reference" 1 "$script" sign "$image:v0.0.1"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failed"
