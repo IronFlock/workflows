@@ -151,14 +151,34 @@ the index) and goes to no transparency log, so no image name or digest of a
 private repository becomes public.
 
 The signing account is not the publisher: the workload identity provider maps
-an attribute that only this workflow, called at a harness tag (`@v1`) on a
-push to `main` or of a version tag, receives, and only that attribute may act
-as the signing account, which holds two roles on the key and nothing else:
+an attribute that only the `publish` job of this workflow, called at a harness
+tag (`@v1`) on a push to `main` or of a version tag, receives, and only that
+attribute may act as the signing account. Every job of a reusable workflow
+carries the same `job_workflow_ref` claim, so the attribute also requires the
+`environment` claim `image-provenance`, which only `publish` has
+(`environment: { name: image-provenance, deployment: false }`: no deployment
+is recorded; a calling repository gets the environment on its first release).
+The mapping:
+
+```text
+attribute.provenance = (assertion.event_name == 'push'
+  && (assertion.ref == 'refs/heads/main' || assertion.ref.startsWith('refs/tags/v'))
+  && assertion.job_workflow_ref.startsWith('IronFlock/workflows/.github/workflows/release-image.yml@refs/tags/v')
+  && has(assertion.environment) && assertion.environment == 'image-provenance')
+  ? 'release-image' : 'other'
+```
+
+`has()` keeps the mapping valid for the many tokens without an environment;
+a mapping that fails to evaluate refuses every token of the provider. The
+self-test job `provenance-environment-claim` checks that GitHub still issues
+the claim with `deployment: false`. The signing account holds two roles on the
+key and nothing else:
 `roles/cloudkms.signerVerifier` (sign, read the public key) and
 `roles/cloudkms.viewer` (cosign reads the key and the key version before it
 signs; `signerVerifier` alone fails with PermissionDenied on
-`cloudkms.cryptoKeys.get`). A caller's own jobs and the Dockerfile's steps, which run in
-the build job, cannot obtain it; no build job holds a credentials file. The
+`cloudkms.cryptoKeys.get`). A caller's own jobs cannot obtain it, nor can the
+build job, where the Dockerfile's steps run, even if a step broke out of
+BuildKit's sandbox; no build job holds a credentials file. The
 `publish` job takes its scripts and cosign from the commit of
 `release-image.yml` it runs from (the `job_workflow_sha` claim of its OIDC
 token), never from the caller's `harness-ref`.

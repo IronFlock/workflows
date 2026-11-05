@@ -16,9 +16,11 @@
 # The provenance is signed in `publish`, the one job that runs no code of the
 # repository being released: no build, no checkout of it. Its signing account
 # is a separate identity that the workload identity provider grants only to
-# this workflow at a harness tag on a main or version-tag push, so neither a
-# Dockerfile step nor a job of the caller can sign. No step of a build job
-# holds a credentials file: the build context never contains one.
+# this workflow at a harness tag on a main or version-tag push, and only to
+# its job in the environment image-provenance (`publish`), so neither a
+# Dockerfile step, nor anything else in the build job, nor a job of the
+# caller can sign. No step of a build job holds a credentials file: the build
+# context never contains one.
 #
 # The git tag is set afterwards by release-tag.yml (a job of its own in the
 # caller, `needs` this one), so this workflow never needs write access to the
@@ -397,6 +399,14 @@ jobs:
       && (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.verify.outputs.build == 'false'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # The signing identity is granted only to a token whose `environment`
+    # claim is image-provenance: this job's. Every job of this workflow carries
+    # the same job_workflow_ref, so without it the build job, which runs the
+    # Dockerfile's steps, could obtain it too. No deployment is recorded; the
+    # caller's repository gets the environment on its first release.
+    environment:
+      name: image-provenance
+      deployment: false
     permissions:
       contents: read
       id-token: write
@@ -424,10 +434,12 @@ jobs:
           claims=$(base64 -d <<<"$payload")
           ref=$(jq -r '.job_workflow_ref // empty' <<<"$claims")
           sha=$(jq -r '.job_workflow_sha // empty' <<<"$claims")
+          environment=$(jq -r '.environment // empty' <<<"$claims")
           case "$ref" in
             IronFlock/workflows/.github/workflows/release-image.yml@*) ;;
             *) echo "::error::this job runs from '$ref', not from IronFlock/workflows release-image.yml"; exit 1 ;;
           esac
+          [ "$environment" = image-provenance ] || { echo "::error::the job's OIDC token has the environment '$environment', not image-provenance: the signing account would refuse it"; exit 1; }
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::the job's OIDC token names no workflow commit"; exit 1; }
           echo "harness: $ref at $sha"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
