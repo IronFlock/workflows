@@ -47,7 +47,7 @@ The inputs of each workflow are documented in its `on.workflow_call` block.
 | [security.yml](.github/workflows/security.yml) | `gitleaks`, `deps`, `semgrep`, `sbom`, `config`, `licenses`, `image`, `report` | security screening; `report` applies `fail-on` |
 | [workflows-lint.yml](.github/workflows/workflows-lint.yml) | `lint` | actionlint, zizmor, pinact on the caller's workflows; always blocking |
 | [release-intent.yml](.github/workflows/release-intent.yml) | `intent` | the version file decides: a rise makes a release PR (title `release <name> <tag>` required), an unchanged version a no-release PR; output `kind` gates the release dry run; listed in the `needs` of `ci-ok` |
-| [release-image.yml](.github/workflows/release-image.yml) | `verify`, `build`, `publish` | release of a container image on the merge of a release PR into the protected `main`; native multi-arch build, SBOM + provenance attached, keyless push; on a release PR a dry run (every platform build, no push); re-runs are safe; read rights only; `build-contexts-artifact` hands data an earlier job prepared (with secrets the build must not see) to the build as named contexts |
+| [release-image.yml](.github/workflows/release-image.yml) | `verify`, `build`, `publish` | release of a container image on the merge of a release PR into the protected `main`; native multi-arch build, SBOM attached, SLSA provenance signed with a Cloud KMS key and attached (see [Signed image provenance](#signed-image-provenance)), keyless push; on a release PR a dry run (every platform build, no push); re-runs are safe; read rights only; `build-contexts-artifact` hands data an earlier job prepared (with secrets the build must not see) to the build as named contexts |
 | [release-tag.yml](.github/workflows/release-tag.yml) | `tag` | the annotated git tag of a release, after every image job of the caller; a tag always means "in the registry"; written with a token of the release GitHub App from the caller's `release` environment |
 | [selftest.yml](.github/workflows/selftest.yml) | — | proves the harness against [tests/fixtures](tests/fixtures) |
 
@@ -135,6 +135,48 @@ go run . verify -cert "$CERT" FILE...
 form for a script to embed, `fingerprint` the fingerprint the operator docs
 publish, `keygen` a development key for tests. The commands are documented at
 the top of [main.go](tools/sign-openpgp/main.go).
+
+## Signed image provenance
+
+Every image `release-image.yml` releases carries, on its multi-arch index, one
+signed in-toto attestation per platform: the SLSA v1 provenance BuildKit
+recorded for that platform's build (source repository, commit, Dockerfile,
+build arguments, base images; the platform in
+`buildDefinition.internalParameters.targetPlatform`). The `publish` job signs
+it with [scripts/sign-provenance.sh](scripts/sign-provenance.sh) and cosign,
+after checking that it names this run as builder and the released commit of
+the calling repository as a clean source. The key is a Cloud KMS key version;
+the attestation is kept in the registry next to the image (an OCI referrer of
+the index) and goes to no transparency log, so no image name or digest of a
+private repository becomes public.
+
+The signing account is not the publisher: the workload identity provider maps
+an attribute that only this workflow, called at a harness tag (`@v1`) on a
+push to `main` or of a version tag, receives, and only that attribute may act
+as the signing account, which holds `roles/cloudkms.signerVerifier` on the key
+and nothing else. A caller's own jobs and the Dockerfile's steps, which run in
+the build job, cannot obtain it; no build job holds a credentials file. The
+`publish` job takes its scripts and cosign from the commit of
+`release-image.yml` it runs from (the `job_workflow_sha` claim of its OIDC
+token), never from the caller's `harness-ref`.
+
+Configuration: the organization variables `IMAGE_PROVENANCE_KEY` (cosign's
+form, `gcpkms://projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>/versions/<n>`)
+and `IMAGE_PROVENANCE_SERVICE_ACCOUNT`, or the inputs `provenance-key` and
+`provenance-service-account`. A release without them fails in `verify`,
+before anything is built; dry runs need neither. A re-run signs only what is
+missing.
+
+Verify a released image with the public key
+(`cosign public-key --key <the key's gcpkms URI>` prints it):
+
+```sh
+cosign verify-attestation --key provenance.pub --type slsaprovenance1 \
+  --insecure-ignore-tlog <image>@<index digest>
+```
+
+`--insecure-ignore-tlog` only tells cosign that no transparency log entry is
+expected; the signature is checked against the key.
 
 ## Protected main branch
 

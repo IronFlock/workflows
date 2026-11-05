@@ -8,8 +8,17 @@
 #            (released images are never overwritten)
 #   build    one native build per platform (no QEMU), pushed by digest, with
 #            BuildKit SBOM + SLSA provenance attestations attached
-#   publish  one multi-arch index tagged <tag> and `latest`; SBOM artifact,
-#            digest in the job summary
+#   publish  one multi-arch index tagged <tag> and `latest`; the SLSA
+#            provenance of every platform checked against this run and commit,
+#            signed with the provenance key (Cloud KMS) and attached to the
+#            index; SBOM artifact, digest in the job summary
+#
+# The provenance is signed in `publish`, the one job that runs no code of the
+# repository being released: no build, no checkout of it. Its signing account
+# is a separate identity that the workload identity provider grants only to
+# this workflow at a harness tag on a main or version-tag push, so neither a
+# Dockerfile step nor a job of the caller can sign. No step of a build job
+# holds a credentials file: the build context never contains one.
 #
 # The git tag is set afterwards by release-tag.yml (a job of its own in the
 # caller, `needs` this one), so this workflow never needs write access to the
@@ -112,6 +121,20 @@ on:
         description: Publisher service account (email).
         type: string
         required: true
+      provenance-key:
+        description: >-
+          Cloud KMS key version that signs the SLSA provenance of a released
+          image, as cosign names it
+          (gcpkms://projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>/versions/<n>).
+          A release fails without it; a dry run does not need it.
+        type: string
+        default: ${{ vars.IMAGE_PROVENANCE_KEY }}
+      provenance-service-account:
+        description: >-
+          Service account (email) allowed to sign with the provenance key;
+          only this workflow's publish job uses it.
+        type: string
+        default: ${{ vars.IMAGE_PROVENANCE_SERVICE_ACCOUNT }}
     outputs:
       digest:
         description: Digest of the published multi-arch index (empty in a dry run).
@@ -204,6 +227,22 @@ jobs:
             exit 1
           fi
           echo "$SHA is part of $BRANCH"
+      # Checked before anything is built: a release without signed provenance
+      # never starts.
+      - name: the provenance key is configured
+        if: steps.version.outputs.push == 'true'
+        env:
+          KEY: ${{ inputs.provenance-key }}
+          SIGNER: ${{ inputs.provenance-service-account }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$SIGNER" ]; then
+            echo "::error::no provenance key: set the organization variables IMAGE_PROVENANCE_KEY and IMAGE_PROVENANCE_SERVICE_ACCOUNT, or the inputs provenance-key and provenance-service-account"
+            exit 1
+          fi
+          case "$KEY" in
+            gcpkms://*/versions/[0-9]*) ;;
+            *) echo "::error::provenance-key '$KEY' is not a Cloud KMS key version (gcpkms://projects/.../cryptoKeys/<key>/versions/<n>)"; exit 1 ;;
+          esac
       - id: auth
         if: steps.version.outputs.push == 'true'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -212,6 +251,9 @@ jobs:
           service_account: ${{ inputs.service-account }}
           token_format: access_token
           access_token_lifetime: 300s
+          # Only the access token is used. The default credentials file would
+          # land in the workspace and hold the run's token-request bearer.
+          create_credentials_file: false
       - name: the image tag
         id: image
         env:
@@ -280,6 +322,10 @@ jobs:
           service_account: ${{ inputs.service-account }}
           token_format: access_token
           access_token_lifetime: 3600s
+          # The build context is the workspace: a credentials file there would
+          # be readable by every Dockerfile step after `COPY . .`, and the
+          # image would carry it.
+          create_credentials_file: false
       - name: build ${{ matrix.platform }}${{ needs.verify.outputs.push == 'true' && ' and push by digest' || ' (dry run)' }}
         id: build
         env:
@@ -295,7 +341,15 @@ jobs:
           REVISION: ${{ github.sha }}
           VERSION: ${{ needs.verify.outputs.image-tag }}
           ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+          # The provenance's builder id: this run (publish checks it before signing).
+          BUILDER_ID: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
+          # The context stays inside the checkout: one around it (the runner's
+          # home) would hand the registry login to the Dockerfile's steps.
+          case "$(realpath -- "$CONTEXT")/" in
+            "$(realpath -- "$GITHUB_WORKSPACE")"/*) ;;
+            *) echo "::error::context '$CONTEXT' is outside the checkout"; exit 1 ;;
+          esac
           args=(--platform "$PLATFORM" -f "$DOCKERFILE"
                 --label "org.opencontainers.image.source=$SOURCE_URL"
                 --label "org.opencontainers.image.revision=$REVISION"
@@ -311,7 +365,7 @@ jobs:
           fi
           if [ "$PUSH" = true ]; then
             echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY"
-            args+=(--sbom=true --provenance=mode=max
+            args+=(--sbom=true --provenance="mode=max,version=v1,builder-id=$BUILDER_ID"
                    --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true")
           else
             args+=(--output type=cacheonly)
@@ -335,7 +389,12 @@ jobs:
 
   publish:
     needs: [verify, build]
-    if: needs.verify.outputs.push == 'true' && needs.verify.outputs.build == 'true'
+    # Also after a skipped build: a re-run of a release whose image this
+    # commit already published (verify said build=false) still signs the
+    # provenance if an earlier attempt failed before that.
+    if: >-
+      !cancelled() && needs.verify.result == 'success' && needs.verify.outputs.push == 'true'
+      && (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.verify.outputs.build == 'false'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -345,10 +404,48 @@ jobs:
       digest: ${{ steps.index.outputs.digest }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.build.result == 'success'
         with:
           pattern: ${{ inputs.artifact-prefix }}digest-*
           path: ${{ runner.temp }}/digests
           merge-multiple: true
+      # The scripts that sign come from the commit this workflow file runs
+      # from (the job_workflow_sha claim of the job's OIDC token), not from the
+      # caller's harness-ref input: the signing identity is granted to this
+      # workflow at a harness tag, so the code that signs must be that code.
+      - name: the harness commit of this workflow
+        id: harness
+        run: |
+          token=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=ironflock-harness-commit" | jq -r .value)
+          echo "::add-mask::$token"
+          payload=$(cut -d. -f2 <<<"$token" | tr '_-' '/+')
+          while [ $((${#payload} % 4)) != 0 ]; do payload+="="; done
+          claims=$(base64 -d <<<"$payload")
+          ref=$(jq -r '.job_workflow_ref // empty' <<<"$claims")
+          sha=$(jq -r '.job_workflow_sha // empty' <<<"$claims")
+          case "$ref" in
+            IronFlock/workflows/.github/workflows/release-image.yml@*) ;;
+            *) echo "::error::this job runs from '$ref', not from IronFlock/workflows release-image.yml"; exit 1 ;;
+          esac
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::the job's OIDC token names no workflow commit"; exit 1; }
+          echo "harness: $ref at $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ steps.harness.outputs.sha }}
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace, install cosign
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/harness/scripts/install-tool.sh" cosign
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -356,7 +453,8 @@ jobs:
           workload_identity_provider: ${{ inputs.workload-identity-provider }}
           service_account: ${{ inputs.service-account }}
           token_format: access_token
-          access_token_lifetime: 600s
+          access_token_lifetime: 900s
+          create_credentials_file: false
       - name: multi-arch index ${{ needs.verify.outputs.image-tag }}
         id: index
         env:
@@ -366,15 +464,20 @@ jobs:
           TAG: ${{ needs.verify.outputs.image-tag }}
           LATEST: ${{ inputs.latest }}
           PLATFORMS: ${{ inputs.platforms }}
+          BUILT: ${{ needs.build.result == 'success' }}
         run: |
           echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY"
-          refs=()
-          for f in "$RUNNER_TEMP"/digests/*; do refs+=("$IMAGE@sha256:$(basename "$f")"); done
-          want=$(jq length <<<"$PLATFORMS")
-          [ "${#refs[@]}" -eq "$want" ] || { echo "::error::expected $want platform digests, got ${#refs[@]}"; exit 1; }
-          tags=(-t "$IMAGE:$TAG")
-          if [ "$LATEST" = true ]; then tags+=(-t "$IMAGE:latest"); fi
-          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+          if [ "$BUILT" = true ]; then
+            refs=()
+            for f in "$RUNNER_TEMP"/digests/*; do refs+=("$IMAGE@sha256:$(basename "$f")"); done
+            want=$(jq length <<<"$PLATFORMS")
+            [ "${#refs[@]}" -eq "$want" ] || { echo "::error::expected $want platform digests, got ${#refs[@]}"; exit 1; }
+            tags=(-t "$IMAGE:$TAG")
+            if [ "$LATEST" = true ]; then tags+=(-t "$IMAGE:latest"); fi
+            docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+          else
+            echo "::notice::$IMAGE:$TAG was already published from this commit (verify): only its provenance is signed, if not yet"
+          fi
           digest=$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/sbom"
@@ -388,8 +491,30 @@ jobs:
             echo "|---|---|"
             echo "| index digest | \`$digest\` |"
             echo "| platforms | $(jq -r 'map(.platform) | join(", ")' <<<"$PLATFORMS") |"
-            echo "| attestations | SBOM (SPDX) + SLSA provenance attached to the image |"
+            echo "| attestations | SBOM (SPDX) per platform image; SLSA v1 provenance per platform, signed, on the index |"
           } >> "$GITHUB_STEP_SUMMARY"
+      # The signing identity, separate from the publisher. cosign reaches Cloud
+      # KMS through Application Default Credentials, i.e. this credentials
+      # file: nothing in this job builds or runs code of the repository.
+      - id: signer
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ inputs.workload-identity-provider }}
+          service_account: ${{ inputs.provenance-service-account }}
+      - name: sign the provenance
+        env:
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+          REGISTRY: ${{ needs.verify.outputs.registry }}
+          IMAGE: ${{ inputs.image }}
+          DIGEST: ${{ steps.index.outputs.digest }}
+          COSIGN_KEY: ${{ inputs.provenance-key }}
+          EXPECT_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          EXPECT_REVISION: ${{ github.sha }}
+          EXPECT_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          echo "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY"
+          "$HARNESS/scripts/sign-provenance.sh" sign "$IMAGE@$DIGEST"
+          docker logout "https://$REGISTRY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact-prefix }}release-sbom
