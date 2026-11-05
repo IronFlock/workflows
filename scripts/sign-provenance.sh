@@ -33,6 +33,13 @@
 set -euo pipefail
 
 BUILDKIT_SLSA_V1=https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md
+# The predicate type, given as its URI: with the short name slsaprovenance1,
+# cosign parses the predicate into its SLSA v1 struct and drops BuildKit's
+# own metadata (runDetails.metadata.buildkit_metadata: the vcs source and
+# revision, the layers; buildkit_completeness). With the URI it signs the
+# predicate unchanged, under the same predicate type, so verifying with
+# `--type slsaprovenance1` finds it as before.
+SLSA_PROVENANCE_V1=https://slsa.dev/provenance/v1
 
 check() {
   local file=$1 platform=$2 btype target builder revision source attempt
@@ -113,7 +120,7 @@ sign() {
     check "$work/predicate.json" "$platform"
     "$COSIGN" attest --yes "${registry_flags[@]}" --key "$COSIGN_KEY" \
       --signing-config "$work/no-services.json" \
-      --type slsaprovenance1 --predicate "$work/predicate.json" "$ref" >/dev/null
+      --type "$SLSA_PROVENANCE_V1" --predicate "$work/predicate.json" "$ref" >/dev/null
     echo "$platform: provenance signed and attached"
   done <<<"$platforms"
 

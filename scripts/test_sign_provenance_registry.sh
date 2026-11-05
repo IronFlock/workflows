@@ -35,6 +35,21 @@ attestations() {
       --insecure-ignore-tlog "$1" 2>/dev/null || true; } | grep -c . || true
 }
 
+# same_as_buildkit <ref> <public key>: every signed predicate on <ref> equals,
+# key for key, the provenance BuildKit attached for its platform (cosign must
+# not reshape it: its typed SLSA v1 parsing drops BuildKit's own metadata)
+same_as_buildkit() {
+  local ref=$1 key=$2 provenance signed predicate platform
+  provenance=$(docker buildx imagetools inspect "$ref" --format '{{json .Provenance}}')
+  signed=$("$COSIGN" verify-attestation --allow-http-registry --key "$key" --type slsaprovenance1 \
+    --insecure-ignore-tlog "$ref" 2>/dev/null | jq -c '.payload | @base64d | fromjson | .predicate')
+  [ -n "$signed" ] || return 1
+  while read -r predicate; do
+    platform=$(jq -r '.buildDefinition.internalParameters.targetPlatform' <<<"$predicate")
+    diff <(jq -S --arg p "$platform" '.[$p].SLSA' <<<"$provenance") <(jq -S . <<<"$predicate") || return 1
+  done <<<"$signed"
+}
+
 # The build context: a clean git repository, so the provenance names a known
 # source and revision.
 src="$work/src"
@@ -78,6 +93,8 @@ expect "  and nothing attached" 0 test "$(attestations "$index" "$work/release.p
 expect "both platforms signed" 0 "$script" sign "$index"
 expect "  two attestations verify" 0 test "$(attestations "$index" "$work/release.pub")" = 2
 expect "  they name both platforms" 0 bash -c "\"$COSIGN\" verify-attestation --allow-http-registry --key '$work/release.pub' --type slsaprovenance1 --insecure-ignore-tlog '$index' 2>/dev/null | jq -r '.payload | @base64d | fromjson | .predicate.buildDefinition.internalParameters.targetPlatform' | sort | paste -sd, - | grep -qx linux/amd64,linux/arm64"
+expect "  the signed predicates are BuildKit's, unchanged" 0 same_as_buildkit "$index" "$work/release.pub"
+expect "  as in-toto statements of predicate type SLSA provenance v1" 0 bash -c "\"$COSIGN\" verify-attestation --allow-http-registry --key '$work/release.pub' --type https://slsa.dev/provenance/v1 --insecure-ignore-tlog '$index' 2>/dev/null | jq -r '.payload | @base64d | fromjson | .predicateType' | sort -u | grep -qx https://slsa.dev/provenance/v1"
 expect "  another key verifies none" 0 test "$(attestations "$index" "$work/other.pub")" = 0
 expect "re-run signs nothing twice" 0 "$script" sign "$index"
 expect "  still two attestations" 0 test "$(attestations "$index" "$work/release.pub")" = 2

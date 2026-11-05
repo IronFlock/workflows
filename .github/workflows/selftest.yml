@@ -582,6 +582,32 @@ jobs:
       - name: sign, verify, re-run, refuse
         run: bash scripts/test_sign_provenance_registry.sh localhost:5000
 
+  # The signing account of release-image.yml is granted only to a token whose
+  # `environment` claim is image-provenance, which its publish job gets from
+  # `environment: { name: image-provenance, deployment: false }`. This job is
+  # set up the same way and checks that the claim is there, so a change on
+  # GitHub's side fails here, not in a release.
+  provenance-environment-claim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: image-provenance
+      deployment: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: the job's OIDC token names the environment
+        run: |
+          token=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=ironflock-selftest" | jq -r .value)
+          echo "::add-mask::$token"
+          payload=$(cut -d. -f2 <<<"$token" | tr '_-' '/+')
+          while [ $((${#payload} % 4)) != 0 ]; do payload+="="; done
+          environment=$(base64 -d <<<"$payload" | jq -r '.environment // empty')
+          echo "environment claim: '$environment'"
+          [ "$environment" = image-provenance ] || { echo "::error::no environment claim image-provenance with deployment: false; release-image.yml could not sign"; exit 1; }
+
   assert-planted:
     needs: [security-planted, security-helm, lint-planted]
     # Also when a scanner job broke: the counts then show what is missing.
@@ -617,7 +643,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, shell-gate-arm64, tools-arm64, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, provenance-sign, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, shell-gate-arm64, tools-arm64, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, provenance-sign, provenance-environment-claim, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
