@@ -153,8 +153,11 @@ private repository becomes public.
 The signing account is not the publisher: the workload identity provider maps
 an attribute that only this workflow, called at a harness tag (`@v1`) on a
 push to `main` or of a version tag, receives, and only that attribute may act
-as the signing account, which holds `roles/cloudkms.signerVerifier` on the key
-and nothing else. A caller's own jobs and the Dockerfile's steps, which run in
+as the signing account, which holds two roles on the key and nothing else:
+`roles/cloudkms.signerVerifier` (sign, read the public key) and
+`roles/cloudkms.viewer` (cosign reads the key and the key version before it
+signs; `signerVerifier` alone fails with PermissionDenied on
+`cloudkms.cryptoKeys.get`). A caller's own jobs and the Dockerfile's steps, which run in
 the build job, cannot obtain it; no build job holds a credentials file. The
 `publish` job takes its scripts and cosign from the commit of
 `release-image.yml` it runs from (the `job_workflow_sha` claim of its OIDC
