@@ -1,24 +1,40 @@
-# Scanner and linter binaries installed by scripts/install-tool.sh (linux/amd64 runners).
-# One line per tool: name version sha256 url member
+# Scanner and linter binaries installed by scripts/install-tool.sh (Linux runners).
+# One line per tool and architecture: name version sha256 url member
+#   name    the tool for x86_64 (amd64) runners; <name>/arm64 for arm64 runners
+#           (ubuntu-24.04-arm), same version, next to it
 #   sha256  digest of the downloaded file, as published in the release metadata
 #   member  path of the binary inside the archive, or "-" for a bare binary
-# Update: bump version + url, take the sha256 from the release asset's digest
+# Update: bump version + url of both lines, take the sha256 from the release asset's digest
 # (gh api repos/<owner>/<repo>/releases/tags/<tag> --jq '.assets[] | [.name, .digest]'),
 # then let selftest.yml prove the new version still finds every planted finding.
 #
 # Go tools are not listed here: they run as `go run <module>@<version>` and are
 # verified by the Go checksum database (versions in the workflows' env blocks).
 gitleaks    8.30.1  551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz  gitleaks
+gitleaks/arm64    8.30.1  e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080  https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz  gitleaks
 trivy       0.76.0  e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7  https://github.com/aquasecurity/trivy/releases/download/v0.76.0/trivy_0.76.0_Linux-64bit.tar.gz  trivy
+trivy/arm64       0.76.0  aab21e677a7b7071fc79f1711480840754c18a1b9d9cefa7ccd06af63a0e8f4c  https://github.com/aquasecurity/trivy/releases/download/v0.76.0/trivy_0.76.0_Linux-ARM64.tar.gz  trivy
 osv-scanner 2.7.0   160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b  https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64  -
+osv-scanner/arm64 2.7.0   4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7  https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_arm64  -
 actionlint  1.7.12  8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz  actionlint
+actionlint/arm64  1.7.12  325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6  https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_arm64.tar.gz  actionlint
 zizmor      1.31.1  d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99  https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-x86_64-unknown-linux-gnu.tar.gz  zizmor
+zizmor/arm64      1.31.1  37eebbd5762a44f262d94875431b14a6d2402991e90a685113ea97b8b41be833  https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-aarch64-unknown-linux-gnu.tar.gz  zizmor
 pinact      5.0.0   d005bbb85da80dacdc07816f24a5da723a9f6d1e9f3d3e7e73df33f9caa1358f  https://github.com/suzuki-shunsuke/pinact/releases/download/v5.0.0/pinact_linux_amd64.tar.gz  pinact
+pinact/arm64      5.0.0   d28ca5e9ddd7950da4a808288f8a83f84fc3ca40e86bab970f3adeef33578c0b  https://github.com/suzuki-shunsuke/pinact/releases/download/v5.0.0/pinact_linux_arm64.tar.gz  pinact
 shellcheck  0.11.0  8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz  shellcheck-v0.11.0/shellcheck
+shellcheck/arm64  0.11.0  12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588  https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.xz  shellcheck-v0.11.0/shellcheck
 shfmt       3.14.1  76e77641faa025814b77f153b29796b8e6fa2fca03e0c76a691608b86c7ea7bf  https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_amd64  -
+shfmt/arm64       3.14.1  5f2db09dae91fca848f7adbdd014632e921a383863a2ad7e0450ad3aba0c6489  https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_arm64  -
 just        1.59.0  409044617b6f06517c1035e55ca38c8c856ff8b650e41bc2aa1ef82d5903a23e  https://github.com/casey/just/releases/download/1.59.0/just-1.59.0-x86_64-unknown-linux-musl.tar.gz  just
+just/arm64        1.59.0  23871b1702bfd550fb5f901778fd4290ecf2ee034a45a889fbe96d89b188086d  https://github.com/casey/just/releases/download/1.59.0/just-1.59.0-aarch64-unknown-linux-musl.tar.gz  just
 kubeconform 0.8.0   9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz  kubeconform
+kubeconform/arm64 0.8.0   1f53fc8e81258197a35e8603054162a5af1de8c5af13746c71ab680d9534ed87  https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-arm64.tar.gz  kubeconform
 helm        3.22.0  1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb  https://get.helm.sh/helm-v3.22.0-linux-amd64.tar.gz  linux-amd64/helm
+helm/arm64        3.22.0  f14e804dfee240f55525b667488fe9adca349e63e00c9af634c0beb1421ac310  https://get.helm.sh/helm-v3.22.0-linux-arm64.tar.gz  linux-arm64/helm
 bun         1.4.4   bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c  https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip  bun-linux-x64/bun
+bun/arm64         1.4.4   baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e  https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-aarch64.zip  bun-linux-aarch64/bun
 uv          0.13.0  1468ebd5a5541121837c5a2817b9972ba6090fa6caa3d142620850a47fb75154  https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-unknown-linux-gnu.tar.gz  uv-x86_64-unknown-linux-gnu/uv
+uv/arm64          0.13.0  3ccfb6af6e242433eb552f7d9676abd5412c6595c497e990d9c8cb7b5bd4d2c3  https://github.com/astral-sh/uv/releases/download/0.13.0/uv-aarch64-unknown-linux-gnu.tar.gz  uv-aarch64-unknown-linux-gnu/uv
 uvx         0.13.0  1468ebd5a5541121837c5a2817b9972ba6090fa6caa3d142620850a47fb75154  https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-unknown-linux-gnu.tar.gz  uv-x86_64-unknown-linux-gnu/uvx
+uvx/arm64         0.13.0  3ccfb6af6e242433eb552f7d9676abd5412c6595c497e990d9c8cb7b5bd4d2c3  https://github.com/astral-sh/uv/releases/download/0.13.0/uv-aarch64-unknown-linux-gnu.tar.gz  uv-aarch64-unknown-linux-gnu/uvx
