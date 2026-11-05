@@ -76,6 +76,8 @@ jobs:
         run: bash scripts/test_pr.sh
       - name: publish.sh unit tests
         run: bash scripts/test_publish.sh
+      - name: tools.lock has every tool for x86_64 and arm64
+        run: bash scripts/test_tools_lock.sh
       # Public repository: no internal document names or plan IDs.
       - name: public-repo hygiene
         run: |
@@ -83,6 +85,65 @@ jobs:
             echo "::error::internal references found"
             exit 1
           fi
+
+  # Every tool of tools.lock installs on an arm64 runner as an arm64 binary
+  # and runs.
+  tools-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install every tool
+        run: |
+          mapfile -t tools < <(awk '!/^#/ && NF && $1 !~ /\// { print $1 }' tools.lock)
+          scripts/install-tool.sh "${tools[@]}"
+      - name: each is an arm64 binary and runs
+        run: |
+          fail=0
+          while read -r tool args; do
+            bin=$RUNNER_TEMP/bin/$tool
+            if ! file -L "$bin" | grep -q 'ARM aarch64'; then
+              echo "::error::$tool is not an arm64 binary: $(file -L "$bin")"
+              fail=1
+              continue
+            fi
+            # shellcheck disable=SC2086 # the arguments are space-separated words
+            if out=$("$bin" $args 2>&1); then
+              echo "$tool: $(echo "$out" | head -n 1)"
+            else
+              echo "::error::$tool $args failed: $out"
+              fail=1
+            fi
+          done <<'TOOLS'
+          gitleaks version
+          trivy --version
+          osv-scanner --version
+          actionlint -version
+          zizmor --version
+          pinact --version
+          shellcheck --version
+          shfmt --version
+          just --version
+          kubeconform -v
+          helm version --short
+          bun --version
+          uv --version
+          uvx --version
+          TOOLS
+          exit "$fail"
+
+  # The shell gate's native arm64 build (build-runs-on), as an image builder
+  # for arm64 targets uses it.
+  shell-gate-arm64:
+    uses: ./.github/workflows/shell-gate.yml
+    with:
+      working-directory: tests/fixtures/shell-pass
+      skip: lint,unit
+      build-args: out
+      build-runs-on: ubuntu-24.04-arm
+      harness-ref: ${{ github.sha }}
 
   # The release signer callers run from their harness checkout
   # (tools/sign-openpgp): its tests sign with a development key and check the
@@ -518,7 +579,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, shell-gate-arm64, tools-arm64, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

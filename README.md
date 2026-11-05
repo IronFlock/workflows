@@ -261,6 +261,10 @@ The summary lists exceptions that expire within 30 days.
   [tools.lock](tools.lock) and installed by
   [scripts/install-tool.sh](scripts/install-tool.sh); Go tools and semgrep are
   pinned in the workflows' `env` blocks; actions are pinned to commit SHAs.
+  Every tool has an x86_64 line and a `<name>/arm64` line at the same version;
+  `install-tool.sh` takes the one of the runner's architecture, so callers and
+  the gates' `build-runs-on: ubuntu-24.04-arm` work on arm64 runners.
+  `scripts/test_tools_lock.sh` keeps the two lines in step.
 - **Self-test.** [selftest.yml](.github/workflows/selftest.yml) runs on every
   pull request and weekly. The fixtures plant one finding per scanner (a fake key,
   a reachable call into a vulnerable `golang.org/x/text`, a secret written to
