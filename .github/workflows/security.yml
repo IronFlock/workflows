@@ -1,9 +1,11 @@
 # Reusable security scan: secrets, dependencies, SAST, configuration,
-# licences, SBOM and (optionally) the container image.
+# licences, SBOM and (optionally) the container image and built root
+# filesystems.
 #
-# A scheduled run (the callers' weekly cron) scans the dependencies and the
-# image only: new advisories against unchanged code show up there. The other
-# scans repeat what the last pull request found (`scheduled-full` runs them).
+# A scheduled run (the callers' weekly cron) scans the dependencies, the
+# image and the root filesystems only: new advisories against unchanged code
+# show up there. The other scans repeat what the last pull request found
+# (`scheduled-full` runs them).
 #
 # Every scanner job only reports. The `report` job reads all findings,
 # applies the repository's exceptions (security/vex.openvex.json,
@@ -118,6 +120,25 @@ on:
         description: Events that build and scan the image. Public repositories and release pull requests scan on pull_request too.
         type: string
         default: push,schedule,workflow_dispatch
+      rootfs-recipe:
+        description: >-
+          Recipe that builds a root filesystem (the tree of an OS image), run
+          in working-directory once per rootfs-matrix entry with that entry's
+          args. It runs with ROOTFS_WORK set, a scratch directory on the
+          runner's larger disk, and leaves the tree there. Every event scans
+          it, schedule included.
+        type: string
+        default: ""
+      rootfs-matrix:
+        description: >-
+          JSON list of the trees to build and scan, each {name, args, path,
+          runner}: name ends the artifact names and the code-scanning
+          category (letters, digits, . _ -); args are the recipe's arguments
+          (space-separated); path is the tree the recipe leaves, relative to
+          ROOTFS_WORK or absolute (read as root); runner defaults to
+          ubuntu-latest.
+        type: string
+        default: "[]"
       vex-file:
         type: string
         default: security/vex.openvex.json
@@ -612,8 +633,120 @@ jobs:
           sarif_file: ${{ runner.temp }}/code-scanning
           category: image
 
+  # One job per rootfs-matrix entry: the recipe builds the tree, trivy scans
+  # its packages. A tree the recipe did not leave, or one without an operating
+  # system and its packages, fails the job instead of looking clean; `report`
+  # then reports the scan as incomplete. A matrix without a recipe fails too.
+  rootfs:
+    if: inputs.rootfs-recipe != '' || (inputs.rootfs-matrix != '' && inputs.rootfs-matrix != '[]')
+    name: rootfs (${{ matrix.name }})
+    runs-on: ${{ matrix.runner || 'ubuntu-latest' }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.rootfs-matrix) }}
+    env:
+      # On the runner's second disk where it has one (x64): a tree takes
+      # gigabytes.
+      ROOTFS_WORK: /mnt/rootfs-work
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: ${{ inputs.harness-ref }}
+          path: .harness
+          persist-credentials: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/findings" "$RUNNER_TEMP/sbom"
+      - name: check the entry, scratch space for the build
+        env:
+          RECIPE: ${{ inputs.rootfs-recipe }}
+          NAME: ${{ matrix.name }}
+          TREE: ${{ matrix.path }}
+        run: |
+          if [ -z "$RECIPE" ]; then
+            echo "::error::rootfs-matrix is set, but rootfs-recipe is empty: nothing builds the trees"
+            exit 1
+          fi
+          if ! [[ $NAME =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "::error::rootfs-matrix: every entry needs a name of letters, digits, '.', '_' and '-' (got '$NAME')"
+            exit 1
+          fi
+          if [ -z "$TREE" ]; then
+            echo "::error::rootfs-matrix: entry $NAME has no path"
+            exit 1
+          fi
+          sudo mkdir -p "$ROOTFS_WORK"
+          sudo chown "$(id -u):$(id -g)" "$ROOTFS_WORK"
+      - name: install just and trivy (tools.lock)
+        run: '"$HARNESS/scripts/install-tool.sh" just trivy'
+      - name: just ${{ inputs.rootfs-recipe }} ${{ matrix.args }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RECIPE: ${{ inputs.rootfs-recipe }}
+          ARGS: ${{ matrix.args }}
+        run: |
+          read -ra args <<<"$ARGS"
+          just "$RECIPE" "${args[@]}"
+      - name: trivy rootfs (vulnerabilities with a fix, SBOM)
+        env:
+          NAME: ${{ matrix.name }}
+          TREE: ${{ matrix.path }}
+          VEX: ${{ inputs.vex-file }}
+          TRIVYIGNORE: ${{ inputs.trivyignore }}
+        run: |
+          case $TREE in
+            /*) tree=$TREE ;;
+            *) tree=$ROOTFS_WORK/$TREE ;;
+          esac
+          # As root: a build usually leaves parts of the tree readable by root only.
+          sudo env "PATH=$PATH" "VEX=$VEX" "TRIVYIGNORE=$TRIVYIGNORE" "$HARNESS/scripts/trivy-rootfs.sh" "$tree" \
+            "$RUNNER_TEMP/findings/trivy-rootfs-$NAME.sarif" "$RUNNER_TEMP/sbom/$NAME.cdx.json" | tee "$RUNNER_TEMP/table.txt"
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/findings" "$RUNNER_TEMP/sbom"
+          {
+            echo "### rootfs $NAME: packages with a fixed HIGH or CRITICAL vulnerability"
+            echo '```'
+            tail -n 60 "$RUNNER_TEMP/table.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.artifact-prefix }}-findings-rootfs-${{ matrix.name }}
+          path: ${{ runner.temp }}/findings
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.artifact-prefix }}-rootfs-sbom-${{ matrix.name }}
+          path: ${{ runner.temp }}/sbom
+          if-no-files-found: error
+          retention-days: 90
+      - id: cs
+        if: always() && inputs.code-scanning && !github.event.repository.private
+        env:
+          VEX: ${{ inputs.vex-file }}
+        run: |
+          python3 -I "$HARNESS/scripts/sarif-summary.py" upload-copy --dir "$RUNNER_TEMP/findings" --out "$RUNNER_TEMP/code-scanning" --vex "$VEX"
+          echo "files=$(find "$RUNNER_TEMP/code-scanning" -name '*.sarif' | wc -l)" >> "$GITHUB_OUTPUT"
+      - uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        if: always() && steps.cs.outputs.files > 0
+        continue-on-error: true
+        with:
+          sarif_file: ${{ runner.temp }}/code-scanning
+          category: rootfs-${{ matrix.name }}
+
   report:
-    needs: [gitleaks, deps, semgrep, sbom, config, licenses, image]
+    needs: [gitleaks, deps, semgrep, sbom, config, licenses, image, rootfs]
     # Runs even when a scanner job failed or timed out (it then reports the
     # scan as incomplete), but not when the whole run was cancelled.
     if: ${{ !cancelled() }}
