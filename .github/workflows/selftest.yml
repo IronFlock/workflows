@@ -9,8 +9,10 @@
 #                      secret logged to the console, root container, unpinned
 #                      action, failing Go, Node, Python and bats tests, an
 #                      unquoted shell expansion, a second or missing
-#                      lockfile, a privileged container in a Helm chart) are each
-#                      reported; a Helm chart trivy skips fails the scan
+#                      lockfile, a privileged container in a Helm chart, an
+#                      outdated package in a built root filesystem) are each
+#                      reported; a Helm chart trivy skips and a root tree
+#                      without an operating system fail the scan
 # Negative controls run report-only and are asserted from the outputs, so the
 # self-test is green exactly when every planted finding is detected.
 # `v1` is advanced only to a commit whose self-test is green.
@@ -458,6 +460,55 @@ jobs:
       scheduled-full: true
       harness-ref: ${{ github.sha }}
 
+  # The root filesystem scan: the fixture recipe leaves the tree of an
+  # outdated base image, readable by root only, natively on an x64 and an
+  # arm64 runner. Its fixed vulnerability and both SBOMs are checked in
+  # assert-planted.
+  security-rootfs:
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      working-directory: tests/fixtures/rootfs
+      artifact-prefix: rootfs
+      gitleaks: false
+      semgrep: false
+      config-scan: false
+      licenses: false
+      rootfs-recipe: rootfs
+      rootfs-matrix: >-
+        [{"name": "alpine-amd64", "args": "alpine-amd64 alpine:3.12", "path": "alpine-amd64"},
+        {"name": "alpine-arm64", "args": "alpine-arm64 alpine:3.12", "path": "alpine-arm64", "runner": "ubuntu-24.04-arm"}]
+      code-scanning: false
+      harness-ref: ${{ github.sha }}
+
+  # A tree without an operating system (a wrong path, a build that stopped
+  # early): trivy scans it without an error, so the rootfs scan must fail
+  # instead of reporting it clean.
+  rootfs-scan-empty-tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: scripts/install-tool.sh trivy
+      # Output captured: the expected ::error:: line is not an annotation here.
+      - name: the empty tree must fail trivy-rootfs.sh
+        run: |
+          mkdir -p "$RUNNER_TEMP/empty"
+          if out=$(scripts/trivy-rootfs.sh "$RUNNER_TEMP/empty" "$RUNNER_TEMP/empty.sarif" "$RUNNER_TEMP/empty.cdx.json" 2>&1); then
+            echo "::error::trivy-rootfs.sh passed although the tree has no operating system"
+            exit 1
+          fi
+          if ! grep -q 'no operating system with packages' <<<"$out"; then
+            echo "$out"
+            echo "::error::trivy-rootfs.sh failed, but not on the missing operating system"
+            exit 1
+          fi
+          echo "trivy-rootfs.sh failed on the empty tree as expected"
+
   # Dry run of the release workflow (not the merge of a release pull request:
   # builds both platforms natively, pushes nothing, needs no credentials).
   # The decisions of a real release (merge title, existing tag, re-run) are
@@ -609,7 +660,7 @@ jobs:
           [ "$environment" = image-provenance ] || { echo "::error::no environment claim image-provenance with deployment: false; release-image.yml could not sign"; exit 1; }
 
   assert-planted:
-    needs: [security-planted, security-helm, lint-planted]
+    needs: [security-planted, security-helm, security-rootfs, lint-planted]
     # Also when a scanner job broke: the counts then show what is missing.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -619,10 +670,12 @@ jobs:
         env:
           FINDINGS: ${{ needs.security-planted.outputs.findings }}
           HELM: ${{ needs.security-helm.outputs.findings }}
+          ROOTFS: ${{ needs.security-rootfs.outputs.findings }}
           LINT: ${{ needs.lint-planted.outputs.findings }}
         run: |
           echo "security: $FINDINGS"
           echo "security (helm): $HELM"
+          echo "security (rootfs): $ROOTFS"
           echo "workflow lint: $LINT"
           fail=0
           for cat in secrets vuln-high misconfig-high semgrep-error; do
@@ -632,9 +685,29 @@ jobs:
           if [ "$(jq -r '.["misconfig-high"] // 0' <<<"$HELM")" -lt 1 ]; then
             echo "::error::no misconfig-high finding in the planted Helm chart"; fail=1
           fi
+          if [ "$(jq -r '(.["vuln-critical"] // 0) + (.["vuln-high"] // 0)' <<<"$ROOTFS")" -lt 1 ]; then
+            echo "::error::no vuln-critical or vuln-high finding in the planted root trees"; fail=1
+          fi
           for tool in zizmor pinact; do
             if [ "$(jq -r --arg t "$tool" '.[$t] // 0' <<<"$LINT")" != 1 ]; then
               echo "::error::$tool did not flag the planted workflow"; fail=1
+            fi
+          done
+          exit "$fail"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: rootfs-rootfs-sbom-*
+          path: sbom
+      - name: an SBOM per root tree, each of its runner's architecture
+        run: |
+          fail=0
+          for entry in alpine-amd64:x86_64 alpine-arm64:aarch64; do
+            name=${entry%%:*} arch=${entry#*:}
+            sbom=sbom/rootfs-rootfs-sbom-$name/$name.cdx.json
+            if [ ! -s "$sbom" ]; then
+              echo "::error::no SBOM of the root tree $name"; fail=1
+            elif ! grep -q "arch=$arch" "$sbom"; then
+              echo "::error::the SBOM of $name lists no $arch package"; fail=1
             fi
           done
           exit "$fail"
@@ -643,7 +716,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, shell-gate-arm64, tools-arm64, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, provenance-sign, provenance-environment-claim, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, shell-gate-arm64, tools-arm64, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, security-rootfs, rootfs-scan-empty-tree, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, provenance-sign, provenance-environment-claim, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

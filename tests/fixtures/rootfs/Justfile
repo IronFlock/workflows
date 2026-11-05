@@ -1,0 +1,14 @@
+# Planted for the harness self-test: the root tree of an outdated base image
+# (a fixed critical vulnerability in zlib), standing in for the tree an OS
+# image build leaves. Never use the tree for anything else.
+
+# Export IMAGE's filesystem to $ROOTFS_WORK/NAME, readable by root only
+rootfs NAME IMAGE:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dest="$ROOTFS_WORK/{{ NAME }}"
+    id=$(docker create "{{ IMAGE }}")
+    trap 'docker rm "$id" >/dev/null' EXIT
+    sudo mkdir -p "$dest"
+    docker export "$id" | sudo tar -x -C "$dest"
+    sudo chmod 700 "$dest"

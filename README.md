@@ -2,7 +2,8 @@
 
 Reusable GitHub Actions workflows that give every IronFlock repository the same
 gate (lint, unit tests, build) and the same security screening (secrets,
-dependencies, SAST, configuration, licences, SBOM, container image).
+dependencies, SAST, configuration, licences, SBOM, container image, built root
+filesystems).
 
 Every logic step calls a `just` recipe of the calling repository, so a
 developer runs the same checks locally that CI runs.
@@ -44,7 +45,7 @@ The inputs of each workflow are documented in its `on.workflow_call` block.
 | [node-gate.yml](.github/workflows/node-gate.yml) | `lint`, `unit`, `build` | Node/Bun gate: `package-manager` bun or npm, installs from the lockfile only (`bun install --frozen-lockfile` / `npm ci`), fails on a lockfile of the other package manager; `skip` drops jobs a repository has no recipe for |
 | [python-gate.yml](.github/workflows/python-gate.yml) | `lint`, `unit`, `build` | Python gate: uv from `tools.lock`; with a `uv.lock`, `uv sync --frozen` (all groups) before the recipes, otherwise the recipes bring their own tools (pinned `uvx`) |
 | [shell-gate.yml](.github/workflows/shell-gate.yml) | `lint`, `unit`, `build` | Shell/just gate (image builders, installers, script collections): just, shellcheck, shfmt from `tools.lock`, yamllint and bats from the Ubuntu archive; `build-apt-packages` for build tools, `build-args` for the build recipe, `build-runs-on` for a native arm64 build, `build-artifact-path` hands the build output to a later job |
-| [security.yml](.github/workflows/security.yml) | `gitleaks`, `deps`, `semgrep`, `sbom`, `config`, `licenses`, `image`, `report` | security screening; `report` applies `fail-on` |
+| [security.yml](.github/workflows/security.yml) | `gitleaks`, `deps`, `semgrep`, `sbom`, `config`, `licenses`, `image`, `rootfs`, `report` | security screening; `report` applies `fail-on` |
 | [workflows-lint.yml](.github/workflows/workflows-lint.yml) | `lint` | actionlint, zizmor, pinact on the caller's workflows; always blocking |
 | [release-intent.yml](.github/workflows/release-intent.yml) | `intent` | the version file decides: a rise makes a release PR (title `release <name> <tag>` required), an unchanged version a no-release PR; output `kind` gates the release dry run; listed in the `needs` of `ci-ok` |
 | [release-image.yml](.github/workflows/release-image.yml) | `verify`, `build`, `publish` | release of a container image on the merge of a release PR into the protected `main`; native multi-arch build, SBOM attached, SLSA provenance signed with a Cloud KMS key and attached (see [Signed image provenance](#signed-image-provenance)), keyless push; on a release PR a dry run (every platform build, no push); re-runs are safe; read rights only; `build-contexts-artifact` hands data an earlier job prepared (with secrets the build must not see) to the build as named contexts |
@@ -92,9 +93,26 @@ repository-local `integration` job next to the gate.
   repositories skip the build on pull requests to save Actions minutes, except
   on release pull requests (title `release <name> v<x>`): the image that the
   merge publishes is scanned before the merge.
+- Root filesystems (the tree of an OS image) are built and scanned in the
+  `rootfs` job, one job per entry of `rootfs-matrix`, on every event. The
+  repository's `rootfs-recipe` runs in `working-directory` with the entry's
+  `args` and `ROOTFS_WORK` set, a scratch directory on the runner's larger
+  disk, and leaves the tree there; `path` names it (relative to
+  `ROOTFS_WORK`, or absolute). trivy reads it as root, so the build may leave
+  it readable by root only. The vulnerabilities with a fix count in the
+  `vuln-*` categories; a tree without an operating system and its packages
+  (a wrong `path`, a build that stopped early) fails the job, and so the
+  report, instead of looking clean.
+
+  ```yaml
+  rootfs-recipe: rootfs
+  rootfs-matrix: >-
+    [{"name": "amd64-base", "args": "amd64 base", "path": "amd64-base/rootfs"},
+    {"name": "arm64-base", "args": "arm64 base", "path": "arm64-base/rootfs", "runner": "ubuntu-24.04-arm"}]
+  ```
 
 Every run writes a summary table to the job summary and keeps the raw reports
-as artifacts (`security-findings-*`, `security-sbom`) for 90 days. A workflow that
+as artifacts (`security-findings-*`, `security-sbom`, `security-rootfs-sbom-<name>`) for 90 days. A workflow that
 calls `security.yml` more than once per run gives each call its own `artifact-prefix`. Public repositories also get
 the results in their Security tab, without the vulnerabilities the VEX file
 accepts, so the tab and the report agree.
@@ -213,8 +231,8 @@ succeeded (see [templates/workflows/ci-go.yml](templates/workflows/ci-go.yml)).
 
 The check workflows (`ci.yml`, `security.yml`) run on pull requests into
 `main`, plus the weekly security scan; a run after the merge would test the
-same tree again. The weekly scan covers the dependencies and the image only,
-where new advisories appear without a code change (`scheduled-full: true`
+same tree again. The weekly scan covers the dependencies, the image and the
+root filesystems only, where new advisories appear without a code change (`scheduled-full: true`
 runs every scanner). The version file decides what a pull request is
 (`release-intent.yml`):
 
@@ -312,7 +330,7 @@ request that adds it. Templates are in [templates/repo](templates/repo).
 | File | For | Expiry |
 |---|---|---|
 | `security/vex.openvex.json` | vulnerabilities that do not affect the code (OpenVEX `not_affected` with a `justification`, or `fixed`) | statement `timestamp` + 12 months |
-| `.trivyignore.yaml` | image, configuration and licence findings | `expired_at` (required) |
+| `.trivyignore.yaml` | image, root filesystem, configuration and licence findings | `expired_at` (required) |
 | `.gitleaks.toml` | reviewed secret false positives | review with each change |
 | `.gitleaks-baseline.json` | historical findings that cannot be removed from history | — |
 | `// nosemgrep: <rule>` | a reviewed semgrep false positive, with the reason | — |
@@ -335,9 +353,11 @@ The summary lists exceptions that expire within 30 days.
   a reachable call into a vulnerable `golang.org/x/text`, a secret written to
   the console, a root container on an outdated base image, an unpinned action,
   a failing test, a privileged container in a Helm chart whose dependency is
-  fetched first); the self-test is green only when each one is reported, the
-  same chart without its dependency fails the scan, and the clean fixture
-  passes with every `fail-on` category set. Alerts that
+  fetched first, an outdated package in a root tree built on an x64 and an
+  arm64 runner); the self-test is green only when each one is reported, the
+  same chart without its dependency fails the scan, so does a root tree
+  without an operating system, and the clean fixture passes with every
+  `fail-on` category set. Alerts that
   GitHub raises for the fixtures are expected.
 - **Releases.** Callers use the moving tag `v1`, so a change reaches every
   repository when `v1` moves. The harness has the same recipes as every
