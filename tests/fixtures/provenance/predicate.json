@@ -1,0 +1,59 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md",
+    "externalParameters": {
+      "configSource": {
+        "path": "Dockerfile"
+      },
+      "request": {
+        "args": {
+          "build-arg:VERSION": "v0.0.1"
+        },
+        "compatibilityVersion": 30,
+        "frontend": "dockerfile.v0",
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ]
+      }
+    },
+    "internalParameters": {
+      "builderPlatform": "linux/amd64",
+      "targetPlatform": "linux/amd64"
+    },
+    "resolvedDependencies": [
+      {
+        "digest": {
+          "sha256": "be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
+        },
+        "uri": "pkg:docker/alpine@3.24?platform=linux%2Famd64"
+      }
+    ]
+  },
+  "runDetails": {
+    "builder": {
+      "id": "https://github.com/IronFlock/example/actions/runs/123/attempts/1"
+    },
+    "metadata": {
+      "buildkit_completeness": {
+        "request": true,
+        "resolvedDependencies": false
+      },
+      "buildkit_metadata": {
+        "vcs": {
+          "source": "https://github.com/IronFlock/example.git",
+          "revision": "0123456789abcdef0123456789abcdef01234567",
+          "localdir:context": ".",
+          "localdir:dockerfile": "."
+        }
+      },
+      "finishedOn": "2026-11-05T08:00:10Z",
+      "invocationId": "example",
+      "startedOn": "2026-11-05T08:00:00Z"
+    }
+  }
+}

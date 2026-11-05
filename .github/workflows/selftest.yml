@@ -76,6 +76,8 @@ jobs:
         run: bash scripts/test_pr.sh
       - name: publish.sh unit tests
         run: bash scripts/test_publish.sh
+      - name: sign-provenance.sh check unit tests
+        run: bash scripts/test_sign_provenance.sh
       - name: tools.lock has every tool for x86_64 and arm64
         run: bash scripts/test_tools_lock.sh
       # Public repository: no internal document names or plan IDs.
@@ -131,6 +133,7 @@ jobs:
           bun --version
           uv --version
           uvx --version
+          cosign version
           TOOLS
           exit "$fail"
 
@@ -544,6 +547,31 @@ jobs:
       artifact-prefix: build-context-
       harness-ref: ${{ github.sha }}
 
+  # The publish job's provenance signing (sign-provenance.sh sign) end to end:
+  # a two-platform index with BuildKit provenance in a throwaway registry,
+  # signed with throwaway cosign key files in place of the KMS key; refusal,
+  # re-run and another key's attestation included.
+  provenance-sign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      registry:
+        image: registry:3@sha256:d4032d4cc323c1731c707931ecada07a53076eac38e3b61ae57533f170f2c6c3
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: scripts/install-tool.sh cosign
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # The builder reaches the registry service on localhost.
+          driver-opts: network=host
+      - name: sign, verify, re-run, refuse
+        run: bash scripts/test_sign_provenance_registry.sh localhost:5000
+
   assert-planted:
     needs: [security-planted, security-helm, lint-planted]
     # Also when a scanner job broke: the counts then show what is missing.
@@ -579,7 +607,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, shell-gate-arm64, tools-arm64, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, shell-gate-arm64, tools-arm64, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, provenance-sign, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
