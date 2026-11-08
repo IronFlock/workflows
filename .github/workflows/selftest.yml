@@ -659,6 +659,33 @@ jobs:
           echo "environment claim: '$environment'"
           [ "$environment" = image-provenance ] || { echo "::error::no environment claim image-provenance with deployment: false; release-image.yml could not sign"; exit 1; }
 
+  # attest-provenance.yml as a dry run: a real one would write to the public
+  # transparency log on every pull request.
+  attest-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: mkdir -p out/one && echo image > out/one/one.img.gz && echo bundle > out/one/one.raucb
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: selftest-attest
+          path: out
+          retention-days: 1
+
+  attest-dry-run:
+    needs: [attest-fixture]
+    uses: ./.github/workflows/attest-provenance.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      artifact: selftest-attest
+      subject-path: |
+        */*.img.gz
+        */*.raucb
+      dry-run: true
+
   assert-planted:
     needs: [security-planted, security-helm, security-rootfs, lint-planted]
     # Also when a scanner job broke: the counts then show what is missing.
@@ -716,7 +743,7 @@ jobs:
   # above succeeded (skipped or cancelled counts as failed).
   selftest-ok:
     if: ${{ always() }}
-    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, shell-gate-arm64, tools-arm64, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, security-rootfs, rootfs-scan-empty-tree, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, provenance-sign, provenance-environment-claim, assert-planted]
+    needs: [lint-self, lint-templates, lint-planted, scripts, gate-pass, gate-fail, node-gate-npm, node-gate-npm-tools, node-gate-bun, node-gate-fail, python-gate-pass, python-gate-fail, shell-gate-pass, shell-gate-artifact, shell-gate-fail, shell-gate-arm64, tools-arm64, security-clean, security-clean-node, security-planted, config-scan-skipped-chart, security-helm, security-rootfs, rootfs-scan-empty-tree, release-dry-run, release-dry-run-package-json, build-context-artifact, release-dry-run-build-context, release-dry-run-image-tag, assert-image-tag, provenance-sign, provenance-environment-claim, attest-fixture, attest-dry-run, assert-planted]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
