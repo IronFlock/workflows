@@ -382,3 +382,11 @@ The summary lists exceptions that expire within 30 days.
   categories, `fail-on`, VEX expiry and the code-scanning copy.
 - **Release script.** `bash scripts/test_release.sh` tests the release intent,
   the run modes of `release-image.yml` and the idempotent tag.
+- **Ubuntu packages.** Every `apt-get` on a runner goes through
+  [scripts/apt-install.sh](scripts/apt-install.sh): when a name of the
+  runner's package sources does not resolve, it asks public resolvers
+  (1.1.1.1, 8.8.8.8) before the first try; each `apt-get` call gets 10
+  minutes; a failed try gets a second one, through public resolvers when the
+  first did not use them. A self-hosted runner keeps its resolver.
+  `bash scripts/test_apt_install.sh` tests it with stand-ins for `apt-get`
+  and the resolver, and that no workflow calls `apt-get` itself.
