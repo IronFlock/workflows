@@ -15,8 +15,11 @@
 # shellcheck and shfmt from tools.lock in every job, yamllint (lint) and bats
 # with bats-support and bats-assert (unit) from the Ubuntu archive. A build
 # that needs more (mmdebstrap, genimage, qemu) names them in
-# `build-apt-packages`. `build-artifact-path` hands the build output to a
-# later job of the caller (an image test, a release), as an artifact.
+# `build-apt-packages`. Ubuntu packages are installed by the harness's
+# scripts/apt-install.sh, which asks public resolvers when the runner's
+# resolver does not know the archive's names. `build-artifact-path` hands the
+# build output to a later job of the caller (an image test, a release), as an
+# artifact.
 #
 # Job names stay `lint` / `unit` / `build`, as in the other gates.
 name: shell-gate
@@ -119,9 +122,8 @@ jobs:
         env:
           PKGS: ${{ inputs.apt-packages }}
         run: |
-          sudo apt-get update -qq
           # shellcheck disable=SC2086 # a space-separated list of package names
-          sudo apt-get install -y -qq --no-install-recommends yamllint $PKGS
+          "$HARNESS/scripts/apt-install.sh" yamllint $PKGS
       - name: just ${{ inputs.lint-recipe }}
         working-directory: ${{ inputs.working-directory }}
         env:
@@ -160,9 +162,8 @@ jobs:
         env:
           PKGS: ${{ inputs.apt-packages }}
         run: |
-          sudo apt-get update -qq
           # shellcheck disable=SC2086 # a space-separated list of package names
-          sudo apt-get install -y -qq --no-install-recommends bats bats-support bats-assert $PKGS
+          "$HARNESS/scripts/apt-install.sh" bats bats-support bats-assert $PKGS
       - name: just ${{ inputs.test-recipe }}
         working-directory: ${{ inputs.working-directory }}
         env:
@@ -202,9 +203,8 @@ jobs:
         env:
           PKGS: ${{ inputs.apt-packages }} ${{ inputs.build-apt-packages }}
         run: |
-          sudo apt-get update -qq
           # shellcheck disable=SC2086 # a space-separated list of package names
-          sudo apt-get install -y -qq --no-install-recommends $PKGS
+          "$HARNESS/scripts/apt-install.sh" $PKGS
       - name: just ${{ inputs.build-recipe }} ${{ inputs.build-args }}
         working-directory: ${{ inputs.working-directory }}
         env:

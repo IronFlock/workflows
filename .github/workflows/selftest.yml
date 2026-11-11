@@ -90,6 +90,8 @@ jobs:
         run: bash scripts/test_publish.sh
       - name: sign-provenance.sh check unit tests
         run: bash scripts/test_sign_provenance.sh
+      - name: apt-install.sh unit tests
+        run: bash scripts/test_apt_install.sh
       - name: tools.lock has every tool for x86_64 and arm64
         run: bash scripts/test_tools_lock.sh
       # Public repository: no internal document names or plan IDs.
@@ -338,9 +340,7 @@ jobs:
         with:
           persist-credentials: false
       - run: scripts/install-tool.sh just shellcheck shfmt
-      - run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends bats bats-support bats-assert
+      - run: scripts/apt-install.sh bats bats-support bats-assert
       - name: the planted findings must fail `just lint` and `just test`
         working-directory: tests/fixtures/shell-fail
         run: |
