@@ -263,7 +263,9 @@ cmd_merge() {
         die "merge: $branch changes $vf ($there -> $here): that is a release (just release-patch)"
     done
   fi
-  [ -n "$title" ] || title=$(git log --reverse --format=%s origin/main..HEAD | head -n1)
+  # sed reads to the end: head would stop early, and git log's SIGPIPE (141)
+  # would end the script under pipefail.
+  [ -n "$title" ] || title=$(git log --reverse --format=%s origin/main..HEAD | sed -n 1p)
   [ -n "$title" ] || die "merge: no commits on $branch beyond main"
   if release_title "$title"; then
     die "merge: '$title' starts with 'release ' (the title of release pull requests); pass another title"

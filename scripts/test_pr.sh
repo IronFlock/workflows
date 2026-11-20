@@ -164,6 +164,14 @@ expect "merge: squash auto-merge" logged "gh pr merge feat --squash --auto --del
 check "merge: an existing pull request is reused" 0 merge VERSION "docs: another title"
 expect "merge: no second pull request" not_logged "gh pr create"
 
+# More log output than a pipe holds: a reader that stops after the first line
+# must not end the merge (git log gets SIGPIPE, 141 under pipefail).
+setup VERSION 1.2.3
+echo c >>"$repo/work.txt"
+git -C "$repo" commit -q -am "$(head -c 200000 /dev/zero | tr '\0' x)"
+check "merge: a long branch log still gives the first commit's subject" 0 merge VERSION
+expect "merge: title = the first commit's subject, not the long one" logged "gh pr create --base main --head feat --title fix the widget"
+
 setup VERSION 1.2.3
 git -C "$repo" rm -q VERSION
 git -C "$repo" commit -q -m "a repository without a version"
