@@ -168,7 +168,8 @@ expect "merge: no second pull request" not_logged "gh pr create"
 # must not end the merge (git log gets SIGPIPE, 141 under pipefail).
 setup VERSION 1.2.3
 echo c >>"$repo/work.txt"
-git -C "$repo" commit -q -am "$(head -c 200000 /dev/zero | tr '\0' x)"
+# Through stdin: Linux refuses a single argument over 128 KiB.
+head -c 200000 /dev/zero | tr '\0' x | git -C "$repo" commit -q -a -F -
 check "merge: a long branch log still gives the first commit's subject" 0 merge VERSION
 expect "merge: title = the first commit's subject, not the long one" logged "gh pr create --base main --head feat --title fix the widget"
 
